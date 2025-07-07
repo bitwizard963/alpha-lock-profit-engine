@@ -43,6 +43,11 @@ const TradingDashboard = () => {
   const [isConnected, setIsConnected] = useState(true);
   const [currentPrice, setCurrentPrice] = useState(107314.68);
   const [priceChange24h, setPriceChange24h] = useState(0.30);
+  const [prices, setPrices] = useState({
+    'BTCUSDT': { price: 107314.68, change24h: 0.30 },
+    'ETHUSDT': { price: 3976.45, change24h: 3.36 },
+    'SOLUSDT': { price: 238.92, change24h: 1.63 }
+  });
 
   // Mock data for demonstration
   const [stats] = useState<DashboardStats>({
@@ -54,7 +59,7 @@ const TradingDashboard = () => {
     realTrades: 47
   });
 
-  const [positions] = useState<Position[]>([
+  const [positions, setPositions] = useState<Position[]>([
     {
       id: "1",
       symbol: "BTC/USDT",
@@ -105,11 +110,53 @@ const TradingDashboard = () => {
     }
   ]);
 
-  // Simulate price updates
+  // Update positions with real prices
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentPrice(prev => prev + (Math.random() - 0.5) * 100);
-    }, 3000);
+    setPositions(prev => prev.map(position => {
+      const symbol = position.symbol.replace('/', '');
+      const currentPrice = prices[symbol]?.price || position.currentPrice;
+      const priceDiff = currentPrice - position.entryPrice;
+      const unrealizedPnL = position.side === 'long' ? priceDiff * position.size : -priceDiff * position.size;
+      const unrealizedPnLPct = (unrealizedPnL / (position.entryPrice * position.size)) * 100;
+      
+      return {
+        ...position,
+        currentPrice,
+        unrealizedPnL,
+        unrealizedPnLPct
+      };
+    }));
+  }, [prices]);
+
+  // Fetch real prices from Binance API
+  const fetchBinancePrices = async () => {
+    try {
+      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+      const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`);
+      const data = await response.json();
+      
+      const newPrices: Record<string, { price: number; change24h: number }> = {};
+      data.forEach((ticker: any) => {
+        newPrices[ticker.symbol] = {
+          price: parseFloat(ticker.lastPrice),
+          change24h: parseFloat(ticker.priceChangePercent)
+        };
+      });
+      
+      setPrices(prev => ({ ...prev, ...newPrices }));
+      if (newPrices['BTCUSDT']) {
+        setCurrentPrice(newPrices['BTCUSDT'].price);
+        setPriceChange24h(newPrices['BTCUSDT'].change24h);
+      }
+    } catch (error) {
+      console.error('Failed to fetch prices:', error);
+    }
+  };
+
+  // Fetch prices on mount and then every 5 seconds
+  useEffect(() => {
+    fetchBinancePrices();
+    const interval = setInterval(fetchBinancePrices, 5000);
     return () => clearInterval(interval);
   }, []);
 
