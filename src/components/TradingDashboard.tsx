@@ -10,25 +10,15 @@ import {
   Shield, 
   Activity,
   Wifi,
-  WifiOff 
+  WifiOff,
+  Brain,
+  Zap
 } from "lucide-react";
 
-interface Position {
-  id: string;
-  symbol: string;
-  side: "long" | "short";
-  size: number;
-  entryPrice: number;
-  currentPrice: number;
-  unrealizedPnL: number;
-  unrealizedPnLPct: number;
-  trailingStopPrice: number;
-  takeProfitPrice: number;
-  profitLockMethod: string;
-  timeHeld: string;
-  edgeDecayScore: number;
-  maxDrawdownFromPeak: number;
-}
+import WebSocketDataService, { MarketData } from "@/services/WebSocketDataService";
+import FeatureEngine, { FeatureSet, MarketRegime } from "@/services/FeatureEngine";
+import AIOrchestrator, { TradingSignal } from "@/services/AIOrchestrator";
+import ProfitLockingEngine, { Position } from "@/services/ProfitLockingEngine";
 
 interface DashboardStats {
   totalEquity: number;
@@ -37,79 +27,155 @@ interface DashboardStats {
   maxDrawdown: number;
   openPositions: number;
   realTrades: number;
+  aiSignals: number;
+  activeStrategies: number;
 }
 
 const TradingDashboard = () => {
   const [isConnected, setIsConnected] = useState(true);
-  const [currentPrice, setCurrentPrice] = useState(107314.68);
-  const [priceChange24h, setPriceChange24h] = useState(0.30);
-  const [prices, setPrices] = useState({
-    'BTCUSDT': { price: 107314.68, change24h: 0.30 },
-    'ETHUSDT': { price: 3976.45, change24h: 3.36 },
-    'SOLUSDT': { price: 238.92, change24h: 1.63 }
-  });
+  const [marketData, setMarketData] = useState<MarketData | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [recentSignals, setRecentSignals] = useState<TradingSignal[]>([]);
+  const [currentRegime, setCurrentRegime] = useState<MarketRegime | null>(null);
+  const [features, setFeatures] = useState<FeatureSet | null>(null);
+  
+  // AI Components
+  const [featureEngine] = useState(() => new FeatureEngine());
+  const [aiOrchestrator] = useState(() => new AIOrchestrator());
+  const [profitEngine] = useState(() => new ProfitLockingEngine());
 
-  // Reset data for clean start
-  const [stats] = useState<DashboardStats>({
+  const [stats, setStats] = useState<DashboardStats>({
     totalEquity: 10000.00,
     unrealizedPnL: 0.00,
     winRate: 0,
     maxDrawdown: 0,
     openPositions: 0,
-    realTrades: 0
+    realTrades: 0,
+    aiSignals: 0,
+    activeStrategies: 8
   });
 
-  const [positions, setPositions] = useState<Position[]>([]);
-
-  // Update positions with real prices
   useEffect(() => {
-    setPositions(prev => prev.map(position => {
-      const symbol = position.symbol.replace('/', '');
-      const currentPrice = prices[symbol]?.price || position.currentPrice;
-      const priceDiff = currentPrice - position.entryPrice;
-      const unrealizedPnL = position.side === 'long' ? priceDiff * position.size : -priceDiff * position.size;
-      const unrealizedPnLPct = (unrealizedPnL / (position.entryPrice * position.size)) * 100;
+    // Initialize AI trading system
+    const initializeSystem = () => {
+      // Subscribe to WebSocket data
+      WebSocketDataService.subscribe(handleMarketDataUpdate);
       
-      return {
-        ...position,
-        currentPrice,
-        unrealizedPnL,
-        unrealizedPnLPct
-      };
-    }));
-  }, [prices]);
-
-  // Fetch real prices from Binance API
-  const fetchBinancePrices = async () => {
-    try {
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
-      const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`);
-      const data = await response.json();
-      
-      const newPrices: Record<string, { price: number; change24h: number }> = {};
-      data.forEach((ticker: any) => {
-        newPrices[ticker.symbol] = {
-          price: parseFloat(ticker.lastPrice),
-          change24h: parseFloat(ticker.priceChangePercent)
-        };
+      // Setup profit locking callbacks
+      profitEngine.onPositionExit((position, reason) => {
+        console.log(`Position ${position.id} exited: ${reason}`);
+        aiOrchestrator.updateReward(position.originalSignal, position.unrealizedPnL);
+        setStats(prev => ({
+          ...prev,
+          realTrades: prev.realTrades + 1,
+          winRate: calculateWinRate()
+        }));
       });
-      
-      setPrices(prev => ({ ...prev, ...newPrices }));
-      if (newPrices['BTCUSDT']) {
-        setCurrentPrice(newPrices['BTCUSDT'].price);
-        setPriceChange24h(newPrices['BTCUSDT'].change24h);
-      }
-    } catch (error) {
-      console.error('Failed to fetch prices:', error);
-    }
+    };
+
+    initializeSystem();
+    
+    // Main trading loop - runs every second
+    const tradingLoop = setInterval(() => {
+      runTradingCycle();
+    }, 1000);
+
+    return () => {
+      clearInterval(tradingLoop);
+      WebSocketDataService.unsubscribe(handleMarketDataUpdate);
+    };
+  }, []);
+
+  const handleMarketDataUpdate = (data: MarketData) => {
+    setMarketData(data);
+    featureEngine.updateData(data);
+    
+    // Update positions with current prices
+    const currentPrices: Record<string, number> = {};
+    Object.entries(data.tickers).forEach(([symbol, ticker]) => {
+      currentPrices[symbol] = ticker.price;
+    });
+    
+    profitEngine.updatePositions(currentPrices);
+    setPositions(profitEngine.getPositions());
   };
 
-  // Fetch prices on mount and then every 5 seconds
-  useEffect(() => {
-    fetchBinancePrices();
-    const interval = setInterval(fetchBinancePrices, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const runTradingCycle = () => {
+    if (!marketData) return;
+
+    // Process each symbol
+    Object.keys(marketData.tickers).forEach(symbol => {
+      // Extract features
+      const symbolFeatures = featureEngine.extractFeatures(symbol);
+      if (!symbolFeatures) return;
+
+      // Detect market regime
+      const regime = featureEngine.detectRegime(symbol);
+      if (!regime) return;
+
+      // Update UI state for BTC
+      if (symbol === 'BTCUSDT') {
+        setFeatures(symbolFeatures);
+        setCurrentRegime(regime);
+      }
+
+      // Generate trading signal
+      const signal = aiOrchestrator.generateSignal(
+        symbol,
+        marketData.tickers[symbol].price,
+        symbolFeatures,
+        regime
+      );
+
+      if (signal) {
+        console.log(`AI Signal: ${signal.action} ${signal.symbol} at ${signal.price} (confidence: ${signal.confidence})`);
+        
+        // Execute trade (paper trading)
+        const positionSize = calculatePositionSize(signal);
+        const positionId = profitEngine.addPosition(signal, positionSize);
+        
+        setRecentSignals(prev => [signal, ...prev.slice(0, 9)]);
+        setStats(prev => ({
+          ...prev,
+          aiSignals: prev.aiSignals + 1
+        }));
+      }
+    });
+
+    // Update stats
+    updateDashboardStats();
+  };
+
+  const calculatePositionSize = (signal: TradingSignal): number => {
+    // Fractional Kelly sizing
+    const baseSize = 0.1; // 10% of capital
+    return baseSize * signal.confidence;
+  };
+
+  const calculateWinRate = (): number => {
+    const performance = aiOrchestrator.getStrategyPerformance();
+    let totalWins = 0;
+    let totalTrades = 0;
+    
+    performance.forEach(perf => {
+      totalWins += perf.wins;
+      totalTrades += perf.trials;
+    });
+    
+    return totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
+  };
+
+  const updateDashboardStats = () => {
+    const openPositions = profitEngine.getPositions();
+    const totalUnrealizedPnL = openPositions.reduce((sum, pos) => sum + pos.unrealizedPnL, 0);
+    
+    setStats(prev => ({
+      ...prev,
+      unrealizedPnL: totalUnrealizedPnL,
+      openPositions: openPositions.length,
+      winRate: calculateWinRate()
+    }));
+  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -123,13 +189,16 @@ const TradingDashboard = () => {
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
+  const currentPrice = marketData?.tickers['BTCUSDT']?.price || 0;
+  const priceChange24h = marketData?.tickers['BTCUSDT']?.change24h || 0;
+
   return (
     <div className="min-h-screen bg-background p-6">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Trading Dashboard</h1>
-          <p className="text-muted-foreground">Focus on profits and performance</p>
+          <h1 className="text-3xl font-bold text-foreground">Quantum Nexus AI Trader</h1>
+          <p className="text-muted-foreground">v2.0 - Real-time AI-driven crypto trading</p>
         </div>
         
         <div className="flex items-center gap-4">
@@ -137,7 +206,7 @@ const TradingDashboard = () => {
             {isConnected ? (
               <>
                 <Wifi className="h-4 w-4 text-live" />
-                <Badge variant="secondary" className="bg-live text-white">Live</Badge>
+                <Badge variant="secondary" className="bg-live text-white">Live AI</Badge>
               </>
             ) : (
               <>
@@ -155,30 +224,49 @@ const TradingDashboard = () => {
         </div>
       </div>
 
-      {/* Current Price Display */}
-      <Card className="mb-8">
-        <CardContent className="pt-6">
-          <div className="text-center">
-            <div className="text-sm text-muted-foreground mb-2">BTC/USDT</div>
-            <div className="flex items-center justify-center gap-3 mb-3">
-              <Activity className="h-6 w-6 text-primary" />
-              <div className="text-4xl font-bold text-primary">
-                {formatCurrency(currentPrice)}
+      {/* Current Price & AI Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center">
+              <div className="text-sm text-muted-foreground mb-2">BTC/USDT Live Price</div>
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <Activity className="h-6 w-6 text-primary" />
+                <div className="text-4xl font-bold text-primary">
+                  {formatCurrency(currentPrice)}
+                </div>
+              </div>
+              <div className={`text-lg ${priceChange24h >= 0 ? "text-profit" : "text-loss"}`}>
+                {formatPercentage(priceChange24h)} (24h)
               </div>
             </div>
-            <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
-              <span>Bid: {formatCurrency(currentPrice - 0.21)}</span>
-              <span>Ask: {formatCurrency(currentPrice + 0.21)}</span>
-              <span className={priceChange24h >= 0 ? "text-profit" : "text-loss"}>
-                {formatPercentage(priceChange24h)} (24h)
-              </span>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center">
+              <div className="text-sm text-muted-foreground mb-2">AI System Status</div>
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <Brain className="h-6 w-6 text-primary" />
+                <div className="text-2xl font-bold text-primary">
+                  {currentRegime?.type.toUpperCase() || 'ANALYZING'}
+                </div>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Regime Confidence: {((currentRegime?.confidence || 0) * 100).toFixed(1)}%
+              </div>
+              {features && (
+                <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                  <div>VVIX: {features.vvix.toFixed(3)}</div>
+                  <div>OFI: {features.ofi.toFixed(3)}</div>
+                  <div>VPIN: {features.vpin.toFixed(3)}</div>
+                </div>
+              )}
             </div>
-            <div className="text-xs text-muted-foreground mt-1">
-              Last Trade: {formatCurrency(currentPrice)}(0.000170 BTC)
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -191,7 +279,7 @@ const TradingDashboard = () => {
             <div className="text-2xl font-bold text-profit">
               {formatCurrency(stats.totalEquity)}
             </div>
-            <p className="text-xs text-muted-foreground">+0.00%</p>
+            <p className="text-xs text-muted-foreground">{stats.activeStrategies} strategies active</p>
           </CardContent>
         </Card>
 
@@ -201,7 +289,7 @@ const TradingDashboard = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-profit">
+            <div className={`text-2xl font-bold ${stats.unrealizedPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
               {formatCurrency(stats.unrealizedPnL)}
             </div>
             <p className="text-xs text-muted-foreground">{stats.openPositions} positions</p>
@@ -210,43 +298,43 @@ const TradingDashboard = () => {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Win Rate (Real)</CardTitle>
+            <CardTitle className="text-sm font-medium">AI Win Rate</CardTitle>
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-profit">
-              {stats.winRate}%
+              {stats.winRate.toFixed(1)}%
             </div>
-            <p className="text-xs text-muted-foreground">{stats.realTrades} real trades</p>
+            <p className="text-xs text-muted-foreground">{stats.realTrades} AI trades</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Max Drawdown (Real)</CardTitle>
-            <Shield className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">AI Signals</CardTitle>
+            <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-loss">
-              {stats.maxDrawdown}%
+            <div className="text-2xl font-bold text-primary">
+              {stats.aiSignals}
             </div>
-            <p className="text-xs text-muted-foreground">Peak to trough</p>
+            <p className="text-xs text-muted-foreground">Total generated</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Open Positions */}
+      {/* Live Positions */}
       <Card className="mb-8">
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle>Open Positions</CardTitle>
+            <CardTitle>Live AI Positions</CardTitle>
             <Badge variant="secondary">{positions.length}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           {positions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              No open positions
+              AI system ready - waiting for signals
             </div>
           ) : (
             <div className="space-y-4">
@@ -260,7 +348,7 @@ const TradingDashboard = () => {
                       <div>
                         <div className="font-semibold">{position.symbol}</div>
                         <div className="text-sm text-muted-foreground">
-                          Size: {position.size} | Entry: {formatCurrency(position.entryPrice)}
+                          Size: {position.size.toFixed(4)} | Entry: {formatCurrency(position.entryPrice)}
                         </div>
                       </div>
                     </div>
@@ -295,13 +383,13 @@ const TradingDashboard = () => {
 
                   <div className="flex flex-wrap gap-2 pt-2 border-t">
                     <Badge variant="outline" className="text-xs">
-                      Method: {position.profitLockMethod.replace(/_/g, ' ')}
+                      {position.profitLockMethod.replace(/_/g, ' ')}
                     </Badge>
                     <Badge variant="outline" className="text-xs">
                       Edge Score: {position.edgeDecayScore.toFixed(2)}
                     </Badge>
                     <Badge variant="outline" className="text-xs">
-                      Max DD: {position.maxDrawdownFromPeak.toFixed(2)}%
+                      Max DD: {(position.maxDrawdownFromPeak * 100).toFixed(1)}%
                     </Badge>
                   </div>
                 </div>
@@ -311,30 +399,44 @@ const TradingDashboard = () => {
         </CardContent>
       </Card>
 
-      {/* Recent Signals */}
-      <Card className="mb-8">
+      {/* Recent AI Signals */}
+      <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle>Recent Signals</CardTitle>
-            <Badge variant="secondary">0</Badge>
+            <CardTitle>Recent AI Signals</CardTitle>
+            <Badge variant="secondary">{recentSignals.length}</Badge>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-8 text-muted-foreground">
-            No recent signals
-          </div>
+          {recentSignals.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              AI analyzing market - no signals yet
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {recentSignals.map((signal, index) => (
+                <div key={index} className="flex items-center justify-between p-3 border rounded">
+                  <div className="flex items-center gap-3">
+                    <Badge variant={signal.action === 'buy' ? 'default' : 'secondary'}>
+                      {signal.action.toUpperCase()}
+                    </Badge>
+                    <div>
+                      <div className="font-medium">{signal.symbol}</div>
+                      <div className="text-sm text-muted-foreground">{signal.strategy}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-medium">{formatCurrency(signal.price)}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {(signal.confidence * 100).toFixed(0)}% confidence
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Exit Takeover Button */}
-      <div className="flex justify-center">
-        <Button 
-          size="lg" 
-          className="bg-foreground text-background hover:bg-foreground/90 px-8 py-3 rounded-full"
-        >
-          Exit takeover
-        </Button>
-      </div>
     </div>
   );
 };
