@@ -49,66 +49,17 @@ const TradingDashboard = () => {
     'SOLUSDT': { price: 238.92, change24h: 1.63 }
   });
 
-  // Mock data for demonstration
+  // Reset data for clean start
   const [stats] = useState<DashboardStats>({
     totalEquity: 10000.00,
-    unrealizedPnL: 1247.83,
-    winRate: 73.2,
-    maxDrawdown: 2.1,
-    openPositions: 3,
-    realTrades: 47
+    unrealizedPnL: 0.00,
+    winRate: 0,
+    maxDrawdown: 0,
+    openPositions: 0,
+    realTrades: 0
   });
 
-  const [positions, setPositions] = useState<Position[]>([
-    {
-      id: "1",
-      symbol: "BTC/USDT",
-      side: "long",
-      size: 0.15,
-      entryPrice: 105230.50,
-      currentPrice: 107314.68,
-      unrealizedPnL: 312.63,
-      unrealizedPnLPct: 1.98,
-      trailingStopPrice: 106100.25,
-      takeProfitPrice: 108500.00,
-      profitLockMethod: "volatility_adaptive_trailing_stop",
-      timeHeld: "2h 34m",
-      edgeDecayScore: 0.78,
-      maxDrawdownFromPeak: 0.45
-    },
-    {
-      id: "2", 
-      symbol: "ETH/USDT",
-      side: "long",
-      size: 4.2,
-      entryPrice: 3847.30,
-      currentPrice: 3976.45,
-      unrealizedPnL: 542.43,
-      unrealizedPnLPct: 3.36,
-      trailingStopPrice: 3890.20,
-      takeProfitPrice: 4100.00,
-      profitLockMethod: "partial_profit_scaling",
-      timeHeld: "1h 17m",
-      edgeDecayScore: 0.85,
-      maxDrawdownFromPeak: 0.12
-    },
-    {
-      id: "3",
-      symbol: "SOL/USDT", 
-      side: "short",
-      size: 25.0,
-      entryPrice: 242.87,
-      currentPrice: 238.92,
-      unrealizedPnL: 98.75,
-      unrealizedPnLPct: 1.63,
-      trailingStopPrice: 241.50,
-      takeProfitPrice: 235.00,
-      profitLockMethod: "drawdown_trailing_stop",
-      timeHeld: "45m",
-      edgeDecayScore: 0.72,
-      maxDrawdownFromPeak: 0.28
-    }
-  ]);
+  const [positions, setPositions] = useState<Position[]>([]);
 
   // Update positions with real prices
   useEffect(() => {
