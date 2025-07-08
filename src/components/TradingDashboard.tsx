@@ -87,6 +87,7 @@ const TradingDashboard = () => {
   }, []);
 
   const handleMarketDataUpdate = (data: MarketData) => {
+    console.log('📊 Market data received:', Object.keys(data.tickers).length, 'tickers');
     setMarketData(data);
     featureEngine.updateData(data);
     
@@ -94,6 +95,7 @@ const TradingDashboard = () => {
     const currentPrices: Record<string, number> = {};
     Object.entries(data.tickers).forEach(([symbol, ticker]) => {
       currentPrices[symbol] = ticker.price;
+      console.log(`💰 ${symbol}: $${ticker.price.toFixed(2)} (${ticker.change24h.toFixed(2)}%)`);
     });
     
     profitEngine.updatePositions(currentPrices);
@@ -101,6 +103,7 @@ const TradingDashboard = () => {
   };
 
   const runTradingCycle = () => {
+    console.log('🔄 Trading cycle running, marketData available:', !!marketData);
     if (!marketData) return;
 
     // Process each symbol

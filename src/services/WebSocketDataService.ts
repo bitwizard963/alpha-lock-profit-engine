@@ -36,12 +36,15 @@ class WebSocketDataService {
 
   private connect() {
     try {
+      console.log('Attempting WebSocket connection...');
       // Using Binance WebSocket for real-time data
       const streams = this.symbols.map(s => `${s.toLowerCase()}@ticker`).join('/');
-      this.ws = new WebSocket(`wss://stream.binance.com:9443/ws/${streams}`);
+      const wsUrl = `wss://stream.binance.com:9443/ws/${streams}`;
+      console.log('Connecting to:', wsUrl);
+      this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('✅ WebSocket connected successfully!');
         this.subscribeToOrderBooks();
       };
       
