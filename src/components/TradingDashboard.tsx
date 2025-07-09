@@ -146,9 +146,16 @@ const TradingDashboard = () => {
 
       console.log(`🧠 AI Signal for ${symbol}:`, signal ? `${signal.action} (confidence: ${(signal.confidence*100).toFixed(1)}%)` : 'NONE');
 
-      if (signal) {
+      if (signal && signal.confidence > 0.7) { // Only take high confidence signals
         console.log(`✅ EXECUTING TRADE: ${signal.action.toUpperCase()} ${signal.symbol} at $${signal.price} - Strategy: ${signal.strategy} - Confidence: ${(signal.confidence*100).toFixed(1)}%`);
         console.log(`💭 Reasoning: ${signal.reasoning}`);
+        
+        // Check if we already have too many positions for this symbol
+        const existingPositions = profitEngine.getPositions().filter(p => p.symbol === signal.symbol);
+        if (existingPositions.length >= 2) {
+          console.log(`⚠️ Skipping signal - already have ${existingPositions.length} positions for ${signal.symbol}`);
+          return;
+        }
         
         // Execute trade (paper trading)
         const positionSize = calculatePositionSize(signal);
@@ -169,7 +176,7 @@ const TradingDashboard = () => {
         setPositions(updatedPositions);
         console.log(`📈 Updated UI with ${updatedPositions.length} positions`);
       } else {
-        console.log(`⏸️ No signal generated for ${symbol}`);
+        console.log(`⏸️ No signal generated for ${symbol} or confidence too low (${signal ? (signal.confidence*100).toFixed(1) : 'N/A'}%)`);
       }
     });
 
@@ -184,10 +191,10 @@ const TradingDashboard = () => {
   };
 
   const calculatePositionSize = (signal: TradingSignal): number => {
-    // Calculate position size in USD, not coin amount
-    const riskPerTrade = stats.totalEquity * 0.02; // 2% risk per trade
-    const stopDistance = signal.price * 0.03; // 3% stop distance
-    return riskPerTrade / stopDistance; // This gives us the coin amount
+    // Calculate position size in coin amount for better control
+    const accountValue = stats.totalEquity;
+    const positionValue = accountValue * 0.1; // 10% of account per position
+    return positionValue / signal.price; // Convert USD to coin amount
   };
 
   const calculateWinRate = (): number => {

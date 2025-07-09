@@ -255,36 +255,26 @@ class ProfitLockingEngine {
 
   private calculateATR(symbol: string): number {
     const prices = this.priceHistory[symbol] || [];
-    if (prices.length < 14) return 0.01; // Default ATR
+    if (prices.length < 14) return prices.length > 0 ? prices[prices.length - 1] * 0.02 : 0.01; // 2% of current price as default
 
-    const highs = [...prices];
-    const lows = [...prices];
-    const closes = [...prices];
-
+    // For crypto, we'll use price ranges as a proxy for ATR
     let atrSum = 0;
     for (let i = 1; i < Math.min(14, prices.length); i++) {
-      const high = highs[i];
-      const low = lows[i];
-      const prevClose = closes[i - 1];
-      
-      const tr = Math.max(
-        high - low,
-        Math.abs(high - prevClose),
-        Math.abs(low - prevClose)
-      );
-      atrSum += tr;
+      const priceRange = Math.abs(prices[i] - prices[i - 1]);
+      atrSum += priceRange;
     }
     
     return atrSum / Math.min(13, prices.length - 1);
   }
 
   private calculateInitialStopPrice(signal: TradingSignal, config: ProfitLockConfig, atr: number): number {
-    const atrDistance = atr * config.atrMultiplier;
+    // Use a percentage-based initial stop instead of ATR for more predictable results
+    const stopDistance = signal.price * 0.05; // 5% initial stop
     
     if (signal.action === 'buy') {
-      return signal.price - atrDistance;
+      return signal.price - stopDistance;
     } else {
-      return signal.price + atrDistance;
+      return signal.price + stopDistance;
     }
   }
 
