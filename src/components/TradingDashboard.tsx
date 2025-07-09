@@ -149,12 +149,18 @@ const TradingDashboard = () => {
         
         const positionId = profitEngine.addPosition(signal, positionSize);
         console.log(`📝 Created position: ${positionId}`);
+        console.log(`📊 Current positions count: ${profitEngine.getPositions().length}`);
         
         setRecentSignals(prev => [signal, ...prev.slice(0, 9)]);
         setStats(prev => ({
           ...prev,
           aiSignals: prev.aiSignals + 1
         }));
+        
+        // Update positions immediately
+        const updatedPositions = profitEngine.getPositions();
+        setPositions(updatedPositions);
+        console.log(`📈 Updated UI with ${updatedPositions.length} positions`);
       } else {
         console.log(`⏸️ No signal generated for ${symbol}`);
       }

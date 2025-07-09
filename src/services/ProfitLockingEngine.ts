@@ -39,57 +39,57 @@ class ProfitLockingEngine {
   private defaultConfigs: Record<string, ProfitLockConfig> = {
     volatility_adaptive_trailing_stop: {
       method: 'volatility_adaptive_trailing_stop',
-      atrMultiplier: 2.0,
-      trailingPercent: 0.02,
+      atrMultiplier: 5.0, // Much wider stops for testing
+      trailingPercent: 0.05, // 5% trailing stop
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.3,
-      maxDrawdownPercent: 0.05
+      edgeDecayThreshold: 0.1, // Much lower threshold
+      maxDrawdownPercent: 0.15 // Allow larger drawdown
     },
     partial_profit_scaling: {
       method: 'partial_profit_scaling',
-      atrMultiplier: 1.5,
-      trailingPercent: 0.015,
+      atrMultiplier: 4.0,
+      trailingPercent: 0.04,
       partialProfitLevels: [0.5, 0.75],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.4,
-      maxDrawdownPercent: 0.03
+      edgeDecayThreshold: 0.1,
+      maxDrawdownPercent: 0.12
     },
     fixed_take_profit: {
       method: 'fixed_take_profit',
-      atrMultiplier: 1.0,
-      trailingPercent: 0.025,
+      atrMultiplier: 3.0,
+      trailingPercent: 0.06,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.5,
-      maxDrawdownPercent: 0.08
+      edgeDecayThreshold: 0.1,
+      maxDrawdownPercent: 0.20
     },
     time_based_stop: {
       method: 'time_based_stop',
-      atrMultiplier: 1.5,
-      trailingPercent: 0.02,
+      atrMultiplier: 4.0,
+      trailingPercent: 0.05,
       partialProfitLevels: [],
-      timeBasedExitMinutes: 20,
-      edgeDecayThreshold: 0.4,
-      maxDrawdownPercent: 0.04
+      timeBasedExitMinutes: 60, // Longer time for testing
+      edgeDecayThreshold: 0.1,
+      maxDrawdownPercent: 0.15
     },
     edge_decay_exit: {
       method: 'edge_decay_exit',
-      atrMultiplier: 1.8,
-      trailingPercent: 0.025,
+      atrMultiplier: 5.0,
+      trailingPercent: 0.06,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.2,
-      maxDrawdownPercent: 0.06
+      edgeDecayThreshold: 0.05, // Very low threshold
+      maxDrawdownPercent: 0.18
     },
     drawdown_trailing_stop: {
       method: 'drawdown_trailing_stop',
-      atrMultiplier: 2.2,
-      trailingPercent: 0.018,
+      atrMultiplier: 6.0,
+      trailingPercent: 0.04,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.35,
-      maxDrawdownPercent: 0.02
+      edgeDecayThreshold: 0.1,
+      maxDrawdownPercent: 0.10
     }
   };
 
@@ -185,34 +185,55 @@ class ProfitLockingEngine {
     const config = this.defaultConfigs[position.profitLockMethod];
     const reasons: string[] = [];
 
+    console.log(`🔍 Checking exit conditions for ${position.id}:`);
+    console.log(`   Current price: ${position.currentPrice}, Entry: ${position.entryPrice}`);
+    console.log(`   PnL: ${position.unrealizedPnL.toFixed(2)} (${position.unrealizedPnLPct.toFixed(2)}%)`);
+    console.log(`   Trailing stop: ${position.trailingStopPrice}`);
+    console.log(`   Edge score: ${position.edgeDecayScore.toFixed(3)}`);
+
+    // Don't check exit conditions for very new positions (less than 10 seconds)
+    const positionAge = Date.now() - position.entryTime;
+    if (positionAge < 10000) {
+      console.log(`   ⏰ Position too new (${positionAge}ms), skipping exit checks`);
+      return;
+    }
+
     // Check trailing stop
     if (this.isTrailingStopTriggered(position)) {
       reasons.push('Trailing stop triggered');
+      console.log(`   ❌ Trailing stop triggered`);
     }
 
     // Check take profit
     if (this.isTakeProfitTriggered(position)) {
       reasons.push('Take profit reached');
+      console.log(`   ✅ Take profit reached`);
     }
 
     // Check time-based exit
     if (this.isTimeBasedExitTriggered(position, config)) {
       reasons.push('Time-based exit');
+      console.log(`   ⏰ Time-based exit triggered`);
     }
 
-    // Check edge decay
-    if (position.edgeDecayScore < config.edgeDecayThreshold) {
+    // Check edge decay - make less aggressive
+    if (position.edgeDecayScore < config.edgeDecayThreshold && positionAge > 60000) { // Only after 1 minute
       reasons.push('Edge decay threshold reached');
+      console.log(`   📉 Edge decay triggered`);
     }
 
-    // Check max drawdown
-    if (position.maxDrawdownFromPeak > config.maxDrawdownPercent) {
+    // Check max drawdown - make less aggressive
+    if (position.maxDrawdownFromPeak > config.maxDrawdownPercent && position.unrealizedPnL < 0) { // Only for losing positions
       reasons.push('Maximum drawdown exceeded');
+      console.log(`   📉 Max drawdown exceeded`);
     }
 
     // Execute exit if any condition is met
     if (reasons.length > 0) {
+      console.log(`🚪 Exiting position ${position.id}: ${reasons.join(', ')}`);
       this.exitPosition(position, reasons.join(', '));
+    } else {
+      console.log(`   ✅ All exit checks passed, position remains open`);
     }
   }
 
