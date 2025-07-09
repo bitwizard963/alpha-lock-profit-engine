@@ -108,7 +108,8 @@ class AIOrchestrator {
     const selectedStrategy = this.selectStrategy(features, regime);
     const signal = this.executeStrategy(selectedStrategy, symbol, price, features, regime);
     
-    if (signal && signal.confidence >= 0.6) {
+    if (signal && signal.confidence >= 0.3) { // Reduced from 0.6 to 0.3 for more signals
+      console.log(`📶 Signal passed confidence threshold: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}%)`);
       this.recentSignals.push(signal);
       
       // Keep only recent signals
@@ -117,6 +118,8 @@ class AIOrchestrator {
       }
       
       return signal;
+    } else if (signal) {
+      console.log(`❌ Signal rejected - low confidence: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}% < 30%)`);
     }
     
     return null;
@@ -192,10 +195,10 @@ class AIOrchestrator {
   private trendFollowingStrategy(signal: TradingSignal, features: FeatureSet): TradingSignal {
     const trendStrength = Math.abs(features.trend);
     
-    if (trendStrength > 0.3) {
+    if (trendStrength > 0.01) { // Much more aggressive - reduced from 0.3
       signal.action = features.trend > 0 ? 'buy' : 'sell';
-      signal.confidence = Math.min(trendStrength * 2, 1);
-      signal.reasoning = `Strong ${features.trend > 0 ? 'upward' : 'downward'} trend detected`;
+      signal.confidence = Math.min(trendStrength * 10, 1); // Increased multiplier
+      signal.reasoning = `Trend detected: ${features.trend > 0 ? 'upward' : 'downward'} (${(features.trend * 100).toFixed(3)}%)`;
     }
     
     return signal;
@@ -204,10 +207,10 @@ class AIOrchestrator {
   private momentumStrategy(signal: TradingSignal, features: FeatureSet): TradingSignal {
     const momentumStrength = Math.abs(features.momentum);
     
-    if (momentumStrength > 0.02 && features.volatility < 0.8) {
+    if (momentumStrength > 0.001) { // Much more aggressive - reduced from 0.02
       signal.action = features.momentum > 0 ? 'buy' : 'sell';
-      signal.confidence = Math.min(momentumStrength * 20, 1);
-      signal.reasoning = `Momentum signal: ${(features.momentum * 100).toFixed(2)}%`;
+      signal.confidence = Math.min(momentumStrength * 50, 1); // Increased multiplier
+      signal.reasoning = `Momentum signal: ${(features.momentum * 100).toFixed(3)}%`;
     }
     
     return signal;

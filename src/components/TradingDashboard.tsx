@@ -75,13 +75,7 @@ const TradingDashboard = () => {
 
     initializeSystem();
     
-    // Main trading loop - runs every second
-    const tradingLoop = setInterval(() => {
-      runTradingCycle();
-    }, 1000);
-
     return () => {
-      clearInterval(tradingLoop);
       WebSocketDataService.unsubscribe(handleMarketDataUpdate);
     };
   }, []);
@@ -100,53 +94,80 @@ const TradingDashboard = () => {
     
     profitEngine.updatePositions(currentPrices);
     setPositions(profitEngine.getPositions());
+    
+    // Trigger trading cycle immediately with fresh data
+    runTradingCycleWithData(data);
   };
 
-  const runTradingCycle = () => {
-    console.log('🔄 Trading cycle running, marketData available:', !!marketData);
-    if (!marketData) return;
-
+  const runTradingCycleWithData = (data: MarketData) => {
+    console.log('🚀 Trading cycle with fresh data - symbols:', Object.keys(data.tickers));
+    
     // Process each symbol
-    Object.keys(marketData.tickers).forEach(symbol => {
+    Object.keys(data.tickers).forEach(symbol => {
+      console.log(`🔍 Processing ${symbol}...`);
+      
       // Extract features
       const symbolFeatures = featureEngine.extractFeatures(symbol);
-      if (!symbolFeatures) return;
+      console.log(`📈 Features for ${symbol}:`, symbolFeatures ? 'EXTRACTED' : 'INSUFFICIENT_DATA');
+      if (!symbolFeatures) {
+        console.log(`❌ Skipping ${symbol} - need more price history`);
+        return;
+      }
 
       // Detect market regime
       const regime = featureEngine.detectRegime(symbol);
-      if (!regime) return;
+      console.log(`🎯 Regime for ${symbol}:`, regime ? `${regime.type} (${(regime.confidence*100).toFixed(1)}%)` : 'NONE');
+      if (!regime) {
+        console.log(`❌ Skipping ${symbol} - no regime detected`);
+        return;
+      }
 
       // Update UI state for BTC
       if (symbol === 'BTCUSDT') {
         setFeatures(symbolFeatures);
         setCurrentRegime(regime);
+        console.log('📊 Updated BTC features for UI');
       }
 
       // Generate trading signal
       const signal = aiOrchestrator.generateSignal(
         symbol,
-        marketData.tickers[symbol].price,
+        data.tickers[symbol].price,
         symbolFeatures,
         regime
       );
 
+      console.log(`🧠 AI Signal for ${symbol}:`, signal ? `${signal.action} (confidence: ${(signal.confidence*100).toFixed(1)}%)` : 'NONE');
+
       if (signal) {
-        console.log(`AI Signal: ${signal.action} ${signal.symbol} at ${signal.price} (confidence: ${signal.confidence})`);
+        console.log(`✅ EXECUTING TRADE: ${signal.action.toUpperCase()} ${signal.symbol} at $${signal.price} - Strategy: ${signal.strategy} - Confidence: ${(signal.confidence*100).toFixed(1)}%`);
+        console.log(`💭 Reasoning: ${signal.reasoning}`);
         
         // Execute trade (paper trading)
         const positionSize = calculatePositionSize(signal);
+        console.log(`💰 Position size: ${positionSize.toFixed(4)}`);
+        
         const positionId = profitEngine.addPosition(signal, positionSize);
+        console.log(`📝 Created position: ${positionId}`);
         
         setRecentSignals(prev => [signal, ...prev.slice(0, 9)]);
         setStats(prev => ({
           ...prev,
           aiSignals: prev.aiSignals + 1
         }));
+      } else {
+        console.log(`⏸️ No signal generated for ${symbol}`);
       }
     });
 
     // Update stats
     updateDashboardStats();
+  };
+
+  const runTradingCycle = () => {
+    console.log('🔄 Trading cycle running, marketData available:', !!marketData);
+    if (!marketData) return;
+    runTradingCycleWithData(marketData);
   };
 
   const calculatePositionSize = (signal: TradingSignal): number => {

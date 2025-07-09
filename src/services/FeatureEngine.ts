@@ -62,7 +62,10 @@ class FeatureEngine {
     const volumes = this.volumeHistory[symbol];
     const orderBooks = this.orderBookHistory[symbol];
 
-    if (prices.length < 20) {
+    console.log(`🔢 Data for ${symbol}: prices=${prices.length}, volumes=${volumes.length}, orderBooks=${orderBooks.length}`);
+
+    if (prices.length < 5) { // Reduced from 20 to 5 for faster testing
+      console.log(`⚠️ ${symbol} needs more data: ${prices.length}/5 prices`);
       return null; // Need minimum data
     }
 
@@ -214,10 +217,10 @@ class FeatureEngine {
 
   private calculateMomentum(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 10) return 0;
+    if (prices.length < 4) return 0;
 
-    const recent = prices.slice(-5);
-    const older = prices.slice(-10, -5);
+    const recent = prices.slice(-2);
+    const older = prices.slice(-4, -2);
     
     const recentAvg = recent.reduce((sum, p) => sum + p, 0) / recent.length;
     const olderAvg = older.reduce((sum, p) => sum + p, 0) / older.length;
@@ -227,7 +230,7 @@ class FeatureEngine {
 
   private calculateMeanReversion(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 20) return 0;
+    if (prices.length < 3) return 0;
 
     const mean = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     const currentPrice = prices[prices.length - 1];
