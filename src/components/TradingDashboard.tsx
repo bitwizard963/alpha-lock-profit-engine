@@ -64,12 +64,19 @@ const TradingDashboard = () => {
       // Setup profit locking callbacks
       profitEngine.onPositionExit((position, reason) => {
         console.log(`Position ${position.id} exited: ${reason}`);
+        console.log(`Realized PnL: $${position.unrealizedPnL.toFixed(2)}`);
+        
         aiOrchestrator.updateReward(position.originalSignal, position.unrealizedPnL);
+        
+        // Update total equity with realized PnL
         setStats(prev => ({
           ...prev,
+          totalEquity: prev.totalEquity + position.unrealizedPnL,
           realTrades: prev.realTrades + 1,
           winRate: calculateWinRate()
         }));
+        
+        console.log(`New total equity: $${stats.totalEquity + position.unrealizedPnL}`);
       });
     };
 
@@ -177,9 +184,10 @@ const TradingDashboard = () => {
   };
 
   const calculatePositionSize = (signal: TradingSignal): number => {
-    // Fractional Kelly sizing
-    const baseSize = 0.1; // 10% of capital
-    return baseSize * signal.confidence;
+    // Calculate position size in USD, not coin amount
+    const riskPerTrade = stats.totalEquity * 0.02; // 2% risk per trade
+    const stopDistance = signal.price * 0.03; // 3% stop distance
+    return riskPerTrade / stopDistance; // This gives us the coin amount
   };
 
   const calculateWinRate = (): number => {
