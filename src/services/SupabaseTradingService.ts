@@ -2,7 +2,8 @@ import { localTradingService, type MarketData, type Trade, type Portfolio } from
 import { TradingSignal } from './AIOrchestrator';
 import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
-import { MarketData } from './WebSocketDataService';
+import { MarketData as WebSocketMarketData } from './WebSocketDataService';
+import { supabase } from '../integrations/supabase/client';
 
 interface TradingSession {
   id: string;
@@ -14,6 +15,64 @@ export type { MarketData, Trade, Portfolio };
 
 class SupabaseTradingService {
   private currentSessionId: string | null = null;
+
+  // Market Data
+  async saveMarketData(marketData: WebSocketMarketData): Promise<boolean> {
+    try {
+      const timestamp = new Date().toISOString();
+      const marketDataRecords = [];
+
+      // Process tickers
+      Object.entries(marketData.tickers).forEach(([symbol, ticker]) => {
+        marketDataRecords.push({
+          symbol,
+          price: parseFloat(ticker.price.toString()),
+          volume: parseFloat(ticker.volume.toString()),
+          timestamp,
+          data_type: 'ticker'
+        });
+      });
+
+      // Process order books
+      Object.entries(marketData.orderBooks).forEach(([symbol, orderBook]) => {
+        const bestBid = orderBook.bids[0]?.[0] || 0;
+        const bestAsk = orderBook.asks[0]?.[0] || 0;
+        const bidVolume = orderBook.bids.slice(0, 5).reduce((sum, [_, vol]) => sum + vol, 0);
+        const askVolume = orderBook.asks.slice(0, 5).reduce((sum, [_, vol]) => sum + vol, 0);
+
+        marketDataRecords.push({
+          symbol,
+          price: (bestBid + bestAsk) / 2, // Mid price
+          volume: bidVolume + askVolume,
+          timestamp,
+          data_type: 'orderbook',
+          metadata: {
+            best_bid: bestBid,
+            best_ask: bestAsk,
+            bid_volume: bidVolume,
+            ask_volume: askVolume,
+            spread: bestAsk - bestBid
+          }
+        });
+      });
+
+      if (marketDataRecords.length > 0) {
+        const { error } = await supabase
+          .from('market_data')
+          .insert(marketDataRecords);
+
+        if (error) {
+          console.error('Error saving market data:', error);
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error saving market data:', error);
+      return false;
+    }
+  }
 
   // Trading Signals
   async saveSignal(signal: TradingSignal, features: FeatureSet, regime: MarketRegime): Promise<string | null> {
