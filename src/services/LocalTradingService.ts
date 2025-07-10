@@ -288,3 +288,4 @@ class LocalTradingService {
 
 // Export singleton instance
 export const localTradingService = new LocalTradingService();
+export default localTradingService;
