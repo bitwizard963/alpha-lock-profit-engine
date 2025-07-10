@@ -4,11 +4,6 @@ import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
 import { supabase } from '../integrations/supabase/client';
 
-interface TradingSession {
-  id: string;
-  session_name?: string;
-}
-
 // Re-export types for backward compatibility
 export type { MarketData, Trade, Portfolio };
 
@@ -309,9 +304,10 @@ class SupabaseTradingService {
       const { data, error } = await supabase
         .from('trading_sessions')
         .insert({
+          session_name: `Session ${new Date().toLocaleDateString()}`,
           initial_equity: initialEquity,
-          configuration,
-          session_name: `Session ${new Date().toLocaleDateString()}`
+          configuration: configuration,
+          status: 'active'
         })
         .select('id')
         .single();
@@ -344,7 +340,15 @@ class SupabaseTradingService {
         return null;
       }
 
-      return data;
+      this.currentSessionId = data.id;
+      return {
+        id: data.id,
+        session_name: data.session_name,
+        initial_equity: parseFloat(data.initial_equity.toString()),
+        total_trades: data.total_trades,
+        winning_trades: data.winning_trades,
+        total_pnl: parseFloat(data.total_pnl.toString())
+      };
     } catch (error) {
       console.error('Error fetching current session:', error);
       return null;
@@ -409,7 +413,7 @@ class SupabaseTradingService {
     return {
       id: record.position_id,
       symbol: record.symbol,
-      side: record.side,
+      side: record.side as 'long' | 'short',
       size: parseFloat(record.size.toString()),
       entryPrice: parseFloat(record.entry_price.toString()),
       currentPrice: parseFloat(record.current_price.toString()),
@@ -426,7 +430,7 @@ class SupabaseTradingService {
       atrValue: parseFloat(record.atr_value?.toString() || '0'),
       originalSignal: {
         symbol: record.symbol,
-        action: record.side === 'long' ? 'buy' : 'sell',
+        action: 'buy',
         confidence: 0.5,
         strategy: 'unknown',
         price: parseFloat(record.entry_price.toString()),
@@ -487,6 +491,16 @@ interface StrategyPerformance {
   performance_history: number[];
   last_updated: string;
   created_at: string;
+}
+
+// Update TradingSession interface to match what's being used
+interface TradingSession {
+  id: string;
+  session_name?: string;
+  initial_equity: number;
+  total_trades: number;
+  winning_trades: number;
+  total_pnl: number;
 }
 
 export default new SupabaseTradingService();
