@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { localTradingService, type MarketData, type Trade, type Portfolio } from './LocalTradingService';
 import { TradingSignal } from './AIOrchestrator';
 import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
@@ -7,35 +7,8 @@ import { MarketData } from './WebSocketDataService';
 interface TradingSession {
   id: string;
   session_name?: string;
-  start_time: string;
-  end_time?: string;
-  initial_equity: number;
-  final_equity?: number;
-  total_trades: number;
-  winning_trades: number;
-  total_pnl: number;
-  max_drawdown?: number;
-  sharpe_ratio?: number;
-  configuration: any;
-  status: 'active' | 'stopped' | 'completed';
-  created_at: string;
-  updated_at: string;
-}
-
-interface StrategyPerformance {
-  id: string;
-  strategy_id: string;
-  strategy_name: string;
-  wins: number;
-  trials: number;
-  total_pnl: number;
-  win_rate: number;
-  alpha: number;
-  beta: number;
-  performance_history: number[];
-  last_updated: string;
-  created_at: string;
-}
+// Re-export types for backward compatibility
+export type { MarketData, Trade, Portfolio };
 
 class SupabaseTradingService {
   private currentSessionId: string | null = null;
@@ -333,29 +306,10 @@ class SupabaseTradingService {
         return false;
       }
 
-      return true;
-    } catch (error) {
-      console.error('Error saving market features:', error);
-      return false;
-    }
-  }
-
-  async saveMarketData(marketData: MarketData): Promise<boolean> {
-    try {
-      // Clamp numeric values to prevent overflow
-      const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
-      const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
-      
-      const records = Object.entries(marketData.tickers).map(([symbol, ticker]) => ({
-        symbol,
-        price: clampToDecimal20_8(ticker.price),
-        volume: clampToDecimal20_8(ticker.volume),
+    return localTradingService.saveMarketData(data);
         change_24h: clampToDecimal8_4(ticker.change24h),
         timestamp: new Date(ticker.timestamp).toISOString()
       }));
-
-      const { error } = await supabase
-        .from('market_data')
         .insert(records);
 
       if (error) {
@@ -369,26 +323,7 @@ class SupabaseTradingService {
       return false;
     }
   }
-
-  // Trading Sessions
-  async startTradingSession(initialEquity: number, configuration: any): Promise<string | null> {
-    try {
-      const { data, error } = await supabase
-        .from('trading_sessions')
-        .insert({
-          session_name: `Session ${new Date().toLocaleDateString()}`,
-          initial_equity: initialEquity,
-          configuration
-        })
-        .select('id')
-        .single();
-
-      if (error) {
-        console.error('Error starting trading session:', error);
-        return null;
-      }
-
-      this.currentSessionId = data.id;
+    return localTradingService.getPortfolioPosition(symbol);
       return data.id;
     } catch (error) {
       console.error('Error starting trading session:', error);
@@ -398,158 +333,7 @@ class SupabaseTradingService {
 
   async updateTradingSession(
     sessionId: string,
-    totalTrades: number,
-    winningTrades: number,
-    totalPnl: number,
-    finalEquity?: number,
-    maxDrawdown?: number
-  ): Promise<boolean> {
-    try {
-      const updates: any = {
-        total_trades: totalTrades,
-        winning_trades: winningTrades,
-        total_pnl: totalPnl
-      };
-
-      if (finalEquity !== undefined) updates.final_equity = finalEquity;
-      if (maxDrawdown !== undefined) updates.max_drawdown = maxDrawdown;
-
-      const { error } = await supabase
-        .from('trading_sessions')
-        .update(updates)
-        .eq('id', sessionId);
-
-      if (error) {
-        console.error('Error updating trading session:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error updating trading session:', error);
-      return false;
-    }
-  }
-
-  async getCurrentSession(): Promise<TradingSession | null> {
-    try {
-      const { data, error } = await supabase
-        .from('trading_sessions')
-        .select('*')
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching current session:', error);
-        return null;
-      }
-
-      if (data) {
-        this.currentSessionId = data.id;
-        return {
-          ...data,
-          status: data.status as 'active' | 'stopped' | 'completed'
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Error fetching current session:', error);
-      return null;
-    }
-  }
-
-  // Analytics
-  async getTradingAnalytics(timeframe: 'day' | 'week' | 'month' = 'day') {
-    try {
-      const startDate = new Date();
-      switch (timeframe) {
-        case 'day':
-          startDate.setDate(startDate.getDate() - 1);
-          break;
-        case 'week':
-          startDate.setDate(startDate.getDate() - 7);
-          break;
-        case 'month':
-          startDate.setMonth(startDate.getMonth() - 1);
-          break;
-      }
-
-      const [positionsResult, signalsResult, featuresResult] = await Promise.all([
-        supabase
-          .from('trading_positions')
-          .select('*')
-          .gte('created_at', startDate.toISOString()),
-        supabase
-          .from('trading_signals')
-          .select('*')
-          .gte('created_at', startDate.toISOString()),
-        supabase
-          .from('market_features')
-          .select('*')
-          .gte('created_at', startDate.toISOString())
-          .order('timestamp', { ascending: false })
-          .limit(100)
-      ]);
-
-      return {
-        positions: positionsResult.data || [],
-        signals: signalsResult.data || [],
-        features: featuresResult.data || []
-      };
-    } catch (error) {
-      console.error('Error fetching analytics:', error);
-      return { positions: [], signals: [], features: [] };
-    }
-  }
-
-  // Helper methods
-  private parseTimeHeld(timeHeld: string): number {
-    const match = timeHeld.match(/(\d+)h\s*(\d+)m|(\d+)m/);
-    if (!match) return 0;
-    
-    if (match[1] && match[2]) {
-      return parseInt(match[1]) * 60 + parseInt(match[2]);
-    } else if (match[3]) {
-      return parseInt(match[3]);
-    }
-    
-    return 0;
-  }
-
-  private dbRecordToPosition(record: any): Position {
-    return {
-      id: record.position_id,
-      symbol: record.symbol,
-      side: record.side,
-      size: parseFloat(record.size),
-      entryPrice: parseFloat(record.entry_price),
-      currentPrice: parseFloat(record.current_price),
-      unrealizedPnL: parseFloat(record.unrealized_pnl),
-      unrealizedPnLPct: parseFloat(record.unrealized_pnl_pct),
-      trailingStopPrice: parseFloat(record.trailing_stop_price),
-      takeProfitPrice: parseFloat(record.take_profit_price),
-      profitLockMethod: record.profit_lock_method,
-      timeHeld: this.formatTimeHeld(record.time_held_minutes),
-      entryTime: new Date(record.entry_time).getTime(),
-      edgeDecayScore: parseFloat(record.edge_decay_score),
-      maxDrawdownFromPeak: parseFloat(record.max_drawdown_from_peak),
-      peakPnL: parseFloat(record.peak_pnl),
-      atrValue: parseFloat(record.atr_value),
-      originalSignal: {} as TradingSignal // This would need to be populated separately if needed
-    };
-  }
-
-  private formatTimeHeld(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-  }
-
-  getCurrentSessionId(): string | null {
-    return this.currentSessionId;
+    return localTradingService.getTradingAnalytics();
   }
 }
 
