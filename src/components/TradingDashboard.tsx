@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -12,8 +13,11 @@ import {
   Wifi,
   WifiOff,
   Brain,
-  Zap
+  Zap,
+  BarChart3
 } from "lucide-react";
+
+import TradingAnalytics from "./TradingAnalytics";
 
 import WebSocketDataService, { MarketData } from "@/services/WebSocketDataService";
 import FeatureEngine, { FeatureSet, MarketRegime } from "@/services/FeatureEngine";
@@ -106,11 +110,11 @@ const TradingDashboard = () => {
     runTradingCycleWithData(data);
   };
 
-  const runTradingCycleWithData = (data: MarketData) => {
+  const runTradingCycleWithData = async (data: MarketData) => {
     console.log('🚀 Trading cycle with fresh data - symbols:', Object.keys(data.tickers));
     
     // Process each symbol
-    Object.keys(data.tickers).forEach(symbol => {
+    for (const symbol of Object.keys(data.tickers)) {
       console.log(`🔍 Processing ${symbol}...`);
       
       // Extract features
@@ -137,16 +141,17 @@ const TradingDashboard = () => {
       }
 
       // Generate trading signal
-      const signal = aiOrchestrator.generateSignal(
+      const signalResult = await aiOrchestrator.generateSignal(
         symbol,
         data.tickers[symbol].price,
         symbolFeatures,
         regime
       );
 
-      console.log(`🧠 AI Signal for ${symbol}:`, signal ? `${signal.action} (confidence: ${(signal.confidence*100).toFixed(1)}%)` : 'NONE');
+      console.log(`🧠 AI Signal for ${symbol}:`, signalResult ? `${signalResult.signal.action} (confidence: ${(signalResult.signal.confidence*100).toFixed(1)}%)` : 'NONE');
 
-      if (signal && signal.confidence > 0.7) { // Only take high confidence signals
+      if (signalResult && signalResult.signal.confidence > 0.7) { // Only take high confidence signals
+        const { signal, signalId } = signalResult;
         console.log(`✅ EXECUTING TRADE: ${signal.action.toUpperCase()} ${signal.symbol} at $${signal.price} - Strategy: ${signal.strategy} - Confidence: ${(signal.confidence*100).toFixed(1)}%`);
         console.log(`💭 Reasoning: ${signal.reasoning}`);
         
@@ -161,7 +166,7 @@ const TradingDashboard = () => {
         const positionSize = calculatePositionSize(signal);
         console.log(`💰 Position size: ${positionSize.toFixed(4)}`);
         
-        const positionId = profitEngine.addPosition(signal, positionSize);
+        const positionId = profitEngine.addPosition(signal, positionSize, signalId);
         console.log(`📝 Created position: ${positionId}`);
         console.log(`📊 Current positions count: ${profitEngine.getPositions().length}`);
         
@@ -176,9 +181,9 @@ const TradingDashboard = () => {
         setPositions(updatedPositions);
         console.log(`📈 Updated UI with ${updatedPositions.length} positions`);
       } else {
-        console.log(`⏸️ No signal generated for ${symbol} or confidence too low (${signal ? (signal.confidence*100).toFixed(1) : 'N/A'}%)`);
+        console.log(`⏸️ No signal generated for ${symbol} or confidence too low (${signalResult ? (signalResult.signal.confidence*100).toFixed(1) : 'N/A'}%)`);
       }
-    });
+    }
 
     // Update stats
     updateDashboardStats();
@@ -239,6 +244,13 @@ const TradingDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background p-6">
+      <Tabs defaultValue="dashboard" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="dashboard">Live Trading</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="dashboard" className="space-y-8">
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div>
@@ -480,10 +492,16 @@ const TradingDashboard = () => {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
+         </CardContent>
+       </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <TradingAnalytics />
+        </TabsContent>
+      </Tabs>
+     </div>
+   );
+ };
 
 export default TradingDashboard;

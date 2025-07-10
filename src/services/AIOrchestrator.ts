@@ -1,4 +1,5 @@
 import { FeatureSet, MarketRegime } from './FeatureEngine';
+import SupabaseTradingService from './SupabaseTradingService';
 
 interface Strategy {
   id: string;
@@ -99,17 +100,25 @@ class AIOrchestrator {
     return samples[0].strategyId;
   }
 
-  generateSignal(
+  async generateSignal(
     symbol: string, 
     price: number, 
     features: FeatureSet, 
     regime: MarketRegime
-  ): TradingSignal | null {
+  ): Promise<{ signal: TradingSignal; signalId: string } | null> {
     const selectedStrategy = this.selectStrategy(features, regime);
     const signal = this.executeStrategy(selectedStrategy, symbol, price, features, regime);
     
     if (signal && signal.confidence >= 0.3) { // Reduced from 0.6 to 0.3 for more signals
       console.log(`📶 Signal passed confidence threshold: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}%)`);
+      
+      // Save signal to database
+      const signalId = await SupabaseTradingService.saveSignal(signal, features, regime);
+      if (!signalId) {
+        console.error('Failed to save signal to database');
+        return null;
+      }
+      
       this.recentSignals.push(signal);
       
       // Keep only recent signals
@@ -117,7 +126,7 @@ class AIOrchestrator {
         this.recentSignals.shift();
       }
       
-      return signal;
+      return { signal, signalId };
     } else if (signal) {
       console.log(`❌ Signal rejected - low confidence: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}% < 30%)`);
     }
@@ -148,6 +157,19 @@ class AIOrchestrator {
       if (strategy.performance.length > 50) {
         strategy.performance.shift();
       }
+      
+      // Save strategy performance to database
+      const totalPnl = strategy.performance.reduce((sum, p) => sum + p, 0);
+      SupabaseTradingService.updateStrategyPerformance(
+        signal.strategy,
+        strategy.name,
+        arm.wins,
+        arm.trials,
+        totalPnl,
+        arm.alpha,
+        arm.beta,
+        strategy.performance
+      ).catch(console.error);
     }
 
     console.log(`Updated ${signal.strategy}: wins=${arm.wins}, trials=${arm.trials}, profit=${profit}`);

@@ -1,4 +1,5 @@
 import { MarketData, TickerData, OrderBookData } from './WebSocketDataService';
+import SupabaseTradingService from './SupabaseTradingService';
 
 interface FeatureSet {
   vvix: number;
@@ -55,6 +56,9 @@ class FeatureEngine {
         this.orderBookHistory[symbol].shift();
       }
     });
+
+    // Save market data to database (async, non-blocking)
+    SupabaseTradingService.saveMarketData(marketData).catch(console.error);
   }
 
   extractFeatures(symbol: string): FeatureSet | null {
@@ -102,11 +106,16 @@ class FeatureEngine {
       confidence = features.meanReversion;
     }
 
-    return {
+    const regime: MarketRegime = {
       type: regimeType,
       confidence,
       features
     };
+
+    // Save market features to database (async, non-blocking)
+    SupabaseTradingService.saveMarketFeatures(symbol, features, regime).catch(console.error);
+
+    return regime;
   }
 
   private calculateVVIX(symbol: string): number {

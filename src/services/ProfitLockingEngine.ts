@@ -1,4 +1,5 @@
 import { TradingSignal } from './AIOrchestrator';
+import SupabaseTradingService from './SupabaseTradingService';
 
 interface Position {
   id: string;
@@ -35,6 +36,7 @@ class ProfitLockingEngine {
   private positions: Map<string, Position> = new Map();
   private exitCallbacks: Set<(position: Position, reason: string) => void> = new Set();
   private priceHistory: Record<string, number[]> = {};
+  private signalIdMap: Map<string, string> = new Map(); // Maps position IDs to signal IDs
 
   private defaultConfigs: Record<string, ProfitLockConfig> = {
     volatility_adaptive_trailing_stop: {
@@ -100,7 +102,7 @@ class ProfitLockingEngine {
     });
   }
 
-  addPosition(signal: TradingSignal, size: number): string {
+  addPosition(signal: TradingSignal, size: number, signalId?: string): string {
     const positionId = `${signal.symbol}_${Date.now()}`;
     const method = this.selectProfitLockMethod(signal);
     const config = this.defaultConfigs[method];
@@ -129,6 +131,12 @@ class ProfitLockingEngine {
 
     this.positions.set(positionId, position);
     console.log(`Added position ${positionId} using ${method}`);
+    
+    // Save to database if signalId provided
+    if (signalId) {
+      this.signalIdMap.set(positionId, signalId);
+      SupabaseTradingService.savePosition(position, signalId);
+    }
     
     return positionId;
   }
@@ -179,6 +187,9 @@ class ProfitLockingEngine {
 
     // Update trailing stop
     this.updateTrailingStop(position);
+    
+    // Save position updates to database
+    SupabaseTradingService.updatePosition(position).catch(console.error);
   }
 
   private checkExitConditions(position: Position) {
@@ -342,6 +353,9 @@ class ProfitLockingEngine {
     console.log(`Exiting position ${position.id}: ${reason}`);
     console.log(`Final PnL: $${position.unrealizedPnL.toFixed(2)} (${position.unrealizedPnLPct.toFixed(2)}%)`);
     
+    // Close position in database
+    SupabaseTradingService.closePosition(position, reason).catch(console.error);
+    
     this.exitCallbacks.forEach(callback => {
       try {
         callback(position, reason);
@@ -351,6 +365,7 @@ class ProfitLockingEngine {
     });
     
     this.positions.delete(position.id);
+    this.signalIdMap.delete(position.id);
   }
 
   onPositionExit(callback: (position: Position, reason: string) => void) {
