@@ -19,7 +19,7 @@ interface MarketData {
   lastUpdate: number;
 }
 
-import localTradingService from './LocalTradingService';
+import { localTradingService } from './LocalTradingService';
 
 class WebSocketDataService {
   private ws: WebSocket | null = null;
