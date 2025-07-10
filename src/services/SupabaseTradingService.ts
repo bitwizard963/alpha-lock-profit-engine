@@ -79,6 +79,31 @@ class SupabaseTradingService {
     }
   }
 
+  private parseTimeHeld(timeHeld: string): number {
+    if (!timeHeld || typeof timeHeld !== 'string') {
+      return 0;
+    }
+
+    let totalMinutes = 0;
+    
+    // Handle formats like "5m", "1h", "1h 30m", "2h 15m", etc.
+    const timePattern = /(\d+)([hm])/g;
+    let match;
+    
+    while ((match = timePattern.exec(timeHeld)) !== null) {
+      const value = parseInt(match[1], 10);
+      const unit = match[2];
+      
+      if (unit === 'h') {
+        totalMinutes += value * 60;
+      } else if (unit === 'm') {
+        totalMinutes += value;
+      }
+    }
+    
+    return totalMinutes;
+  }
+
   // Trading Positions
   async savePosition(position: Position, originalSignalId?: string): Promise<boolean> {
     try {
