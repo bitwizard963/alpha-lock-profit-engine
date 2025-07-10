@@ -174,7 +174,10 @@ class ProfitLockingEngine {
     
     const drawdownFromPeak = position.peakPnL > 0 ? 
       (position.peakPnL - position.unrealizedPnL) / position.peakPnL : 0;
-    position.maxDrawdownFromPeak = Math.max(position.maxDrawdownFromPeak, drawdownFromPeak);
+    
+    // Clamp drawdown to prevent numeric overflow (max 5.0 = 500% drawdown)
+    const clampedDrawdown = Math.min(Math.max(0, drawdownFromPeak), 5.0);
+    position.maxDrawdownFromPeak = Math.max(position.maxDrawdownFromPeak, clampedDrawdown);
 
     // Update time held
     const timeElapsed = Date.now() - position.entryTime;

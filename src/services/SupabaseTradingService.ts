@@ -43,10 +43,13 @@ class SupabaseTradingService {
   // Trading Signals
   async saveSignal(signal: TradingSignal, features: FeatureSet, regime: MarketRegime): Promise<string | null> {
     try {
+      // Clamp confidence value to ensure it's between 0 and 1
+      const clampedConfidence = Math.min(Math.max(0, signal.confidence), 1);
+      
       const signalData = {
         symbol: signal.symbol,
         action: signal.action,
-        confidence: signal.confidence,
+        confidence: clampedConfidence,
         strategy: signal.strategy,
         price: signal.price,
         reasoning: signal.reasoning,
