@@ -2,8 +2,6 @@ import { localTradingService, type MarketData, type Trade, type Portfolio } from
 import { TradingSignal } from './AIOrchestrator';
 import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
-import { MarketData } from './WebSocketDataService';
-import { supabase } from '@/integrations/supabase/client';
 import { supabase } from '../integrations/supabase/client';
 
 interface TradingSession {
