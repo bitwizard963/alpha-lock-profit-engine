@@ -1,5 +1,5 @@
 import { MarketData, TickerData, OrderBookData } from './WebSocketDataService';
-import supabaseTradingService from './SupabaseTradingService';
+import SupabaseTradingService from './SupabaseTradingService';
 
 interface FeatureSet {
   vvix: number;
@@ -110,7 +110,7 @@ class FeatureEngine {
     };
 
     // Save market features using local service (async, non-blocking)
-    supabaseTradingService.saveMarketFeatures(symbol, features, regime).catch(console.error);
+    SupabaseTradingService.saveMarketFeatures(symbol, features, regime).catch(console.error);
 
     return regime;
   }
