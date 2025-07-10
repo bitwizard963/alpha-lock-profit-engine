@@ -4,15 +4,18 @@ import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
 import { supabase } from '../integrations/supabase/client';
 
-// Re-export types for backward compatibility
-export type { MarketData, Trade, Portfolio };
-
 class SupabaseTradingService {
   private currentSessionId: string | null = null;
 
   // Trading Signals
   async saveSignal(signal: TradingSignal, features: FeatureSet, regime: MarketRegime): Promise<string | null> {
     try {
+      // Check if supabase client is available
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return null;
+      }
+
       // Clamp confidence value to ensure it's between 0 and 1
       const clampedConfidence = Math.min(Math.max(0, signal.confidence), 1);
       
@@ -48,6 +51,11 @@ class SupabaseTradingService {
 
   async getRecentSignals(limit: number = 50): Promise<TradingSignal[]> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return [];
+      }
+
       const { data, error } = await supabase
         .from('trading_signals')
         .select('*')
@@ -102,6 +110,11 @@ class SupabaseTradingService {
   // Trading Positions
   async savePosition(position: Position, originalSignalId?: string): Promise<boolean> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return false;
+      }
+
       // Clamp numeric values to prevent overflow
       const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
       const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
@@ -145,6 +158,11 @@ class SupabaseTradingService {
 
   async updatePosition(position: Position): Promise<boolean> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return false;
+      }
+
       // Clamp numeric values to prevent overflow
       const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
       const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
@@ -179,6 +197,11 @@ class SupabaseTradingService {
 
   async closePosition(position: Position, exitReason: string): Promise<boolean> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return false;
+      }
+
       // Clamp numeric values to prevent overflow
       const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
       
@@ -207,6 +230,11 @@ class SupabaseTradingService {
 
   async getOpenPositions(): Promise<Position[]> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return [];
+      }
+
       const { data, error } = await supabase
         .from('trading_positions')
         .select('*')
@@ -237,6 +265,11 @@ class SupabaseTradingService {
     performanceHistory: number[]
   ): Promise<boolean> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return false;
+      }
+
       const winRate = trials > 0 ? wins / trials : 0;
 
       const { error } = await supabase
@@ -268,6 +301,11 @@ class SupabaseTradingService {
 
   async getStrategyPerformance(): Promise<StrategyPerformance[]> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return [];
+      }
+
       const { data, error } = await supabase
         .from('strategy_performance')
         .select('*')
@@ -301,6 +339,11 @@ class SupabaseTradingService {
   // Trading Sessions
   async startTradingSession(initialEquity: number, configuration: any): Promise<string | null> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return null;
+      }
+
       const { data, error } = await supabase
         .from('trading_sessions')
         .insert({
@@ -327,6 +370,11 @@ class SupabaseTradingService {
 
   async getCurrentSession(): Promise<TradingSession | null> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return null;
+      }
+
       const { data, error } = await supabase
         .from('trading_sessions')
         .select('*')
@@ -361,6 +409,15 @@ class SupabaseTradingService {
     features: any[];
   }> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return {
+          positions: [],
+          signals: [],
+          features: []
+        };
+      }
+
       const now = new Date();
       let startDate = new Date();
       
@@ -443,6 +500,11 @@ class SupabaseTradingService {
   // Market Features & Data
   async saveMarketFeatures(symbol: string, features: FeatureSet, regime: MarketRegime): Promise<boolean> {
     try {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return false;
+      }
+
       // Clamp all numeric values to prevent database overflow
       // Database columns are DECIMAL(10,6) so max value is 9999.999999
       const clampToDecimal10_6 = (value: number) => Math.max(-9999.999999, Math.min(9999.999999, value || 0));
