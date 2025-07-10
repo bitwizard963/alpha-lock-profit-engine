@@ -1,5 +1,5 @@
 import { MarketData, TickerData, OrderBookData } from './WebSocketDataService';
-import SupabaseTradingService from './SupabaseTradingService';
+import localTradingService from './LocalTradingService';
 
 interface FeatureSet {
   vvix: number;
@@ -56,9 +56,6 @@ class FeatureEngine {
         this.orderBookHistory[symbol].shift();
       }
     });
-
-    // Save market data to database (async, non-blocking)
-    SupabaseTradingService.saveMarketData(marketData).catch(console.error);
   }
 
   extractFeatures(symbol: string): FeatureSet | null {
@@ -112,8 +109,8 @@ class FeatureEngine {
       features
     };
 
-    // Save market features to database (async, non-blocking)
-    SupabaseTradingService.saveMarketFeatures(symbol, features, regime).catch(console.error);
+    // Save market features using local service (async, non-blocking)
+    localTradingService.saveMarketFeatures(symbol, features, regime).catch(console.error);
 
     return regime;
   }

@@ -19,6 +19,8 @@ interface MarketData {
   lastUpdate: number;
 }
 
+import localTradingService from './LocalTradingService';
+
 class WebSocketDataService {
   private ws: WebSocket | null = null;
   private subscribers: Set<(data: MarketData) => void> = new Set();
@@ -94,6 +96,10 @@ class WebSocketDataService {
     
     this.marketData.tickers[data.s] = tickerData;
     this.marketData.lastUpdate = Date.now();
+    
+    // Save market data using local service
+    localTradingService.saveMarketData(this.marketData).catch(console.error);
+    
     this.notifySubscribers();
   }
 
