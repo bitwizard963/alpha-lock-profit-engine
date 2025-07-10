@@ -303,6 +303,139 @@ class SupabaseTradingService {
     }
   }
 
+  // Trading Sessions
+  async startTradingSession(initialEquity: number, configuration: any): Promise<string | null> {
+    try {
+      const { data, error } = await supabase
+        .from('trading_sessions')
+        .insert({
+          initial_equity: initialEquity,
+          configuration,
+          session_name: `Session ${new Date().toLocaleDateString()}`
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('Error starting trading session:', error);
+        return null;
+      }
+
+      this.currentSessionId = data.id;
+      return data.id;
+    } catch (error) {
+      console.error('Error starting trading session:', error);
+      return null;
+    }
+  }
+
+  async getCurrentSession(): Promise<TradingSession | null> {
+    try {
+      const { data, error } = await supabase
+        .from('trading_sessions')
+        .select('*')
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.error('Error fetching current session:', error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error fetching current session:', error);
+      return null;
+    }
+  }
+
+  async getTradingAnalytics(timeframe: 'day' | 'week' | 'month'): Promise<{
+    positions: any[];
+    signals: any[];
+    features: any[];
+  }> {
+    try {
+      const now = new Date();
+      let startDate = new Date();
+      
+      switch (timeframe) {
+        case 'day':
+          startDate.setDate(now.getDate() - 1);
+          break;
+        case 'week':
+          startDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          startDate.setDate(now.getDate() - 30);
+          break;
+      }
+
+      const [positionsResult, signalsResult, featuresResult] = await Promise.all([
+        supabase
+          .from('trading_positions')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('trading_signals')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('market_features')
+          .select('*')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+      ]);
+
+      return {
+        positions: positionsResult.data || [],
+        signals: signalsResult.data || [],
+        features: featuresResult.data || []
+      };
+    } catch (error) {
+      console.error('Error fetching trading analytics:', error);
+      return {
+        positions: [],
+        signals: [],
+        features: []
+      };
+    }
+  }
+
+  private dbRecordToPosition(record: any): Position {
+    return {
+      id: record.position_id,
+      symbol: record.symbol,
+      side: record.side,
+      size: parseFloat(record.size.toString()),
+      entryPrice: parseFloat(record.entry_price.toString()),
+      currentPrice: parseFloat(record.current_price.toString()),
+      unrealizedPnL: parseFloat(record.unrealized_pnl.toString()),
+      unrealizedPnLPct: parseFloat(record.unrealized_pnl_pct.toString()),
+      trailingStopPrice: parseFloat(record.trailing_stop_price?.toString() || '0'),
+      takeProfitPrice: parseFloat(record.take_profit_price?.toString() || '0'),
+      profitLockMethod: record.profit_lock_method,
+      timeHeld: `${record.time_held_minutes}m`,
+      entryTime: new Date(record.entry_time).getTime(),
+      edgeDecayScore: parseFloat(record.edge_decay_score?.toString() || '1'),
+      maxDrawdownFromPeak: parseFloat(record.max_drawdown_from_peak?.toString() || '0'),
+      peakPnL: parseFloat(record.peak_pnl?.toString() || '0'),
+      atrValue: parseFloat(record.atr_value?.toString() || '0'),
+      originalSignal: {
+        symbol: record.symbol,
+        action: record.side === 'long' ? 'buy' : 'sell',
+        confidence: 0.5,
+        strategy: 'unknown',
+        price: parseFloat(record.entry_price.toString()),
+        timestamp: new Date(record.entry_time).getTime(),
+        reasoning: ''
+      }
+    };
+  }
+
   // Market Features & Data
   async saveMarketFeatures(symbol: string, features: FeatureSet, regime: MarketRegime): Promise<boolean> {
     try {
