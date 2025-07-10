@@ -107,26 +107,31 @@ class SupabaseTradingService {
   // Trading Positions
   async savePosition(position: Position, originalSignalId?: string): Promise<boolean> {
     try {
+      // Clamp numeric values to prevent overflow
+      const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
+      const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
+      const clampToDecimal5_4 = (value: number) => Math.max(-9.9999, Math.min(9.9999, value || 0));
+      
       const { error } = await supabase
         .from('trading_positions')
         .insert({
           position_id: position.id,
           symbol: position.symbol,
           side: position.side,
-          size: position.size,
-          entry_price: position.entryPrice,
-          current_price: position.currentPrice,
-          unrealized_pnl: position.unrealizedPnL,
-          unrealized_pnl_pct: position.unrealizedPnLPct,
-          trailing_stop_price: position.trailingStopPrice,
-          take_profit_price: position.takeProfitPrice,
+          size: clampToDecimal20_8(position.size),
+          entry_price: clampToDecimal20_8(position.entryPrice),
+          current_price: clampToDecimal20_8(position.currentPrice),
+          unrealized_pnl: clampToDecimal20_8(position.unrealizedPnL),
+          unrealized_pnl_pct: clampToDecimal8_4(position.unrealizedPnLPct),
+          trailing_stop_price: clampToDecimal20_8(position.trailingStopPrice),
+          take_profit_price: clampToDecimal20_8(position.takeProfitPrice),
           profit_lock_method: position.profitLockMethod,
           time_held_minutes: this.parseTimeHeld(position.timeHeld),
           entry_time: new Date(position.entryTime).toISOString(),
-          edge_decay_score: position.edgeDecayScore,
-          max_drawdown_from_peak: position.maxDrawdownFromPeak,
-          peak_pnl: position.peakPnL,
-          atr_value: position.atrValue,
+          edge_decay_score: clampToDecimal5_4(position.edgeDecayScore),
+          max_drawdown_from_peak: clampToDecimal5_4(position.maxDrawdownFromPeak),
+          peak_pnl: clampToDecimal20_8(position.peakPnL),
+          atr_value: clampToDecimal20_8(position.atrValue),
           original_signal_id: originalSignalId,
           status: 'open'
         });
@@ -145,18 +150,23 @@ class SupabaseTradingService {
 
   async updatePosition(position: Position): Promise<boolean> {
     try {
+      // Clamp numeric values to prevent overflow
+      const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
+      const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
+      const clampToDecimal5_4 = (value: number) => Math.max(-9.9999, Math.min(9.9999, value || 0));
+      
       const { error } = await supabase
         .from('trading_positions')
         .update({
-          current_price: position.currentPrice,
-          unrealized_pnl: position.unrealizedPnL,
-          unrealized_pnl_pct: position.unrealizedPnLPct,
-          trailing_stop_price: position.trailingStopPrice,
-          take_profit_price: position.takeProfitPrice,
+          current_price: clampToDecimal20_8(position.currentPrice),
+          unrealized_pnl: clampToDecimal20_8(position.unrealizedPnL),
+          unrealized_pnl_pct: clampToDecimal8_4(position.unrealizedPnLPct),
+          trailing_stop_price: clampToDecimal20_8(position.trailingStopPrice),
+          take_profit_price: clampToDecimal20_8(position.takeProfitPrice),
           time_held_minutes: this.parseTimeHeld(position.timeHeld),
-          edge_decay_score: position.edgeDecayScore,
-          max_drawdown_from_peak: position.maxDrawdownFromPeak,
-          peak_pnl: position.peakPnL
+          edge_decay_score: clampToDecimal5_4(position.edgeDecayScore),
+          max_drawdown_from_peak: clampToDecimal5_4(position.maxDrawdownFromPeak),
+          peak_pnl: clampToDecimal20_8(position.peakPnL)
         })
         .eq('position_id', position.id);
 
@@ -174,14 +184,17 @@ class SupabaseTradingService {
 
   async closePosition(position: Position, exitReason: string): Promise<boolean> {
     try {
+      // Clamp numeric values to prevent overflow
+      const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
+      
       const { error } = await supabase
         .from('trading_positions')
         .update({
           status: 'closed',
           exit_time: new Date().toISOString(),
-          exit_price: position.currentPrice,
+          exit_price: clampToDecimal20_8(position.currentPrice),
           exit_reason: exitReason,
-          realized_pnl: position.unrealizedPnL
+          realized_pnl: clampToDecimal20_8(position.unrealizedPnL)
         })
         .eq('position_id', position.id);
 
@@ -293,21 +306,25 @@ class SupabaseTradingService {
   // Market Features & Data
   async saveMarketFeatures(symbol: string, features: FeatureSet, regime: MarketRegime): Promise<boolean> {
     try {
+      // Clamp all numeric values to prevent database overflow
+      // Database columns are DECIMAL(10,6) so max value is 9999.999999
+      const clampToDecimal10_6 = (value: number) => Math.max(-9999.999999, Math.min(9999.999999, value || 0));
+      
       const { error } = await supabase
         .from('market_features')
         .insert({
           symbol,
-          vvix: features.vvix,
-          ofi: features.ofi,
-          vpin: features.vpin,
-          correlation: features.correlation,
-          liquidity: features.liquidity,
-          volatility: features.volatility,
-          momentum: features.momentum,
-          mean_reversion: features.meanReversion,
-          trend: features.trend,
+          vvix: clampToDecimal10_6(features.vvix),
+          ofi: clampToDecimal10_6(features.ofi),
+          vpin: clampToDecimal10_6(features.vpin),
+          correlation: clampToDecimal10_6(features.correlation),
+          liquidity: clampToDecimal10_6(features.liquidity),
+          volatility: clampToDecimal10_6(features.volatility),
+          momentum: clampToDecimal10_6(features.momentum),
+          mean_reversion: clampToDecimal10_6(features.meanReversion),
+          trend: clampToDecimal10_6(features.trend),
           regime_type: regime.type,
-          regime_confidence: regime.confidence,
+          regime_confidence: Math.max(0, Math.min(1, regime.confidence || 0)),
           timestamp: new Date(features.timestamp).toISOString()
         });
 
@@ -325,11 +342,15 @@ class SupabaseTradingService {
 
   async saveMarketData(marketData: MarketData): Promise<boolean> {
     try {
+      // Clamp numeric values to prevent overflow
+      const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
+      const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
+      
       const records = Object.entries(marketData.tickers).map(([symbol, ticker]) => ({
         symbol,
-        price: ticker.price,
-        volume: ticker.volume,
-        change_24h: ticker.change24h,
+        price: clampToDecimal20_8(ticker.price),
+        volume: clampToDecimal20_8(ticker.volume),
+        change_24h: clampToDecimal8_4(ticker.change24h),
         timestamp: new Date(ticker.timestamp).toISOString()
       }));
 
