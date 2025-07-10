@@ -3,6 +3,7 @@ import { TradingSignal } from './AIOrchestrator';
 import { Position } from './ProfitLockingEngine';
 import { FeatureSet, MarketRegime } from './FeatureEngine';
 import { MarketData } from './WebSocketDataService';
+import { supabase } from '../integrations/supabase/client';
 
 interface TradingSession {
   id: string;
