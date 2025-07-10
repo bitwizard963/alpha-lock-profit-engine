@@ -7,6 +7,8 @@ import { MarketData } from './WebSocketDataService';
 interface TradingSession {
   id: string;
   session_name?: string;
+}
+
 // Re-export types for backward compatibility
 export type { MarketData, Trade, Portfolio };
 
@@ -306,34 +308,11 @@ class SupabaseTradingService {
         return false;
       }
 
-    return localTradingService.saveMarketData(data);
-        change_24h: clampToDecimal8_4(ticker.change24h),
-        timestamp: new Date(ticker.timestamp).toISOString()
-      }));
-        .insert(records);
-
-      if (error) {
-        console.error('Error saving market data:', error);
-        return false;
-      }
-
       return true;
     } catch (error) {
-      console.error('Error saving market data:', error);
+      console.error('Error saving market features:', error);
       return false;
     }
-  }
-    return localTradingService.getPortfolioPosition(symbol);
-      return data.id;
-    } catch (error) {
-      console.error('Error starting trading session:', error);
-      return null;
-    }
-  }
-
-  async updateTradingSession(
-    sessionId: string,
-    return localTradingService.getTradingAnalytics();
   }
 }
 
