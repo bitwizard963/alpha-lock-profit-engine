@@ -24,20 +24,23 @@ class FeatureEngine {
   private priceHistory: Record<string, number[]> = {};
   private volumeHistory: Record<string, number[]> = {};
   private orderBookHistory: Record<string, OrderBookData[]> = {};
-  private maxHistoryLength = 100;
+  private maxHistoryLength = 200; // Increased for better analysis
 
   constructor() {
-    // Initialize history for each symbol
-    ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'].forEach(symbol => {
-      this.priceHistory[symbol] = [];
-      this.volumeHistory[symbol] = [];
-      this.orderBookHistory[symbol] = [];
-    });
+    // Dynamic initialization - no hardcoded symbols
+    console.log('🔧 FeatureEngine initialized with dynamic symbol support');
   }
 
   updateData(marketData: MarketData) {
     // Update price and volume history
     Object.entries(marketData.tickers).forEach(([symbol, ticker]) => {
+      // Initialize arrays for new symbols
+      if (!this.priceHistory[symbol]) {
+        this.priceHistory[symbol] = [];
+        this.volumeHistory[symbol] = [];
+        this.orderBookHistory[symbol] = [];
+      }
+      
       this.priceHistory[symbol].push(ticker.price);
       this.volumeHistory[symbol].push(ticker.volume);
       
@@ -63,10 +66,10 @@ class FeatureEngine {
     const volumes = this.volumeHistory[symbol];
     const orderBooks = this.orderBookHistory[symbol];
 
-    console.log(`🔢 Data for ${symbol}: prices=${prices.length}, volumes=${volumes.length}, orderBooks=${orderBooks.length}`);
+    console.log(`🔢 Data for ${symbol}: prices=${prices?.length || 0}, volumes=${volumes?.length || 0}, orderBooks=${orderBooks?.length || 0}`);
 
-    if (prices.length < 5) { // Reduced from 20 to 5 for faster testing
-      console.log(`⚠️ ${symbol} needs more data: ${prices.length}/5 prices`);
+    if (!prices || prices.length < 10) { // Minimum 10 data points for reliable analysis
+      console.log(`⚠️ ${symbol} needs more data: ${prices?.length || 0}/10 prices`);
       return null; // Need minimum data
     }
 
@@ -117,7 +120,7 @@ class FeatureEngine {
 
   private calculateVVIX(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 20) return 0;
+    if (!prices || prices.length < 20) return 0;
 
     // Calculate volatility of volatility
     const returns = this.calculateReturns(prices);
@@ -176,12 +179,13 @@ class FeatureEngine {
 
   private calculateCorrelation(symbol: string): number {
     // Calculate correlation with BTC if not BTC
-    if (symbol === 'BTCUSDT') return 0;
+    const btcSymbol = 'BTCUSDT';
+    if (symbol === btcSymbol) return 0;
 
     const prices = this.priceHistory[symbol];
-    const btcPrices = this.priceHistory['BTCUSDT'];
+    const btcPrices = this.priceHistory[btcSymbol];
 
-    if (prices.length < 20 || btcPrices.length < 20) return 0;
+    if (!prices || !btcPrices || prices.length < 20 || btcPrices.length < 20) return 0;
 
     const length = Math.min(prices.length, btcPrices.length, 20);
     const priceReturns = this.calculateReturns(prices.slice(-length));
@@ -192,7 +196,7 @@ class FeatureEngine {
 
   private calculateLiquidity(symbol: string): number {
     const orderBooks = this.orderBookHistory[symbol];
-    if (orderBooks.length === 0) return 0;
+    if (!orderBooks || orderBooks.length === 0) return 0;
 
     const latest = orderBooks[orderBooks.length - 1];
     
@@ -215,7 +219,7 @@ class FeatureEngine {
 
   private calculateVolatility(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 2) return 0;
+    if (!prices || prices.length < 2) return 0;
 
     const returns = this.calculateReturns(prices);
     return this.standardDeviation(returns);
@@ -223,7 +227,7 @@ class FeatureEngine {
 
   private calculateMomentum(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 4) return 0;
+    if (!prices || prices.length < 4) return 0;
 
     const recent = prices.slice(-2);
     const older = prices.slice(-4, -2);
@@ -236,7 +240,7 @@ class FeatureEngine {
 
   private calculateMeanReversion(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 3) return 0;
+    if (!prices || prices.length < 3) return 0;
 
     const mean = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     const currentPrice = prices[prices.length - 1];
@@ -248,7 +252,7 @@ class FeatureEngine {
 
   private calculateTrend(symbol: string): number {
     const prices = this.priceHistory[symbol];
-    if (prices.length < 10) return 0;
+    if (!prices || prices.length < 10) return 0;
 
     // Simple linear regression slope
     const n = Math.min(prices.length, 20);
@@ -268,6 +272,29 @@ class FeatureEngine {
     
     // Normalize slope
     return avgPrice > 0 ? slope / avgPrice : 0;
+  }
+
+  // Add method to get supported symbols
+  getSupportedSymbols(): string[] {
+    return Object.keys(this.priceHistory).filter(symbol => 
+      this.priceHistory[symbol] && this.priceHistory[symbol].length >= 10
+    );
+  }
+
+  // Add method to clear old data for symbols no longer tracked
+  cleanupOldSymbols(activeSymbols: string[]) {
+    const allSymbols = Object.keys(this.priceHistory);
+    const symbolsToRemove = allSymbols.filter(symbol => !activeSymbols.includes(symbol));
+    
+    symbolsToRemove.forEach(symbol => {
+      delete this.priceHistory[symbol];
+      delete this.volumeHistory[symbol];
+      delete this.orderBookHistory[symbol];
+    });
+    
+    if (symbolsToRemove.length > 0) {
+      console.log(`🧹 Cleaned up data for ${symbolsToRemove.length} inactive symbols`);
+    }
   }
 
   private calculateReturns(prices: number[]): number[] {

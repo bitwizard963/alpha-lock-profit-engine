@@ -32,12 +32,28 @@ class AIOrchestrator {
   private strategies: Map<string, Strategy> = new Map();
   private banditArms: Map<string, BanditArm> = new Map();
   private recentSignals: TradingSignal[] = [];
-  private learningRate = 0.01;
-  private explorationRate = 0.1;
+  private config: {
+    learningRate: number;
+    explorationRate: number;
+    minConfidenceThreshold: number;
+    maxSignalsPerSymbol: number;
+    signalCooldownMs: number;
+  };
+  private lastSignalTime: Map<string, number> = new Map();
 
-  constructor() {
+  constructor(config?: Partial<AIOrchestrator['config']>) {
+    this.config = {
+      learningRate: 0.015, // Slightly higher learning rate
+      explorationRate: 0.08, // Reduced exploration for more exploitation
+      minConfidenceThreshold: 0.25, // Lower threshold for more signals
+      maxSignalsPerSymbol: 2, // Max concurrent signals per symbol
+      signalCooldownMs: 30000, // 30 second cooldown between signals for same symbol
+      ...config
+    };
+    
     this.initializeStrategies();
     this.initializeBandits();
+    console.log(`🧠 AIOrchestrator initialized with config:`, this.config);
   }
 
   private initializeStrategies() {
@@ -91,8 +107,8 @@ class AIOrchestrator {
     // Sort by sample value and select top strategy
     samples.sort((a, b) => b.sample - a.sample);
     
-    // Epsilon-greedy exploration
-    if (Math.random() < this.explorationRate) {
+    // Epsilon-greedy exploration with configurable rate
+    if (Math.random() < this.config.explorationRate) {
       const randomIndex = Math.floor(Math.random() * samples.length);
       return samples[randomIndex].strategyId;
     }
@@ -106,10 +122,30 @@ class AIOrchestrator {
     features: FeatureSet, 
     regime: MarketRegime
   ): Promise<{ signal: TradingSignal; signalId: string } | null> {
+    // Check signal cooldown
+    const lastSignal = this.lastSignalTime.get(symbol) || 0;
+    const timeSinceLastSignal = Date.now() - lastSignal;
+    
+    if (timeSinceLastSignal < this.config.signalCooldownMs) {
+      console.log(`⏳ Signal cooldown active for ${symbol} (${Math.round((this.config.signalCooldownMs - timeSinceLastSignal) / 1000)}s remaining)`);
+      return null;
+    }
+
+    // Check if we have too many recent signals for this symbol
+    const recentSymbolSignals = this.recentSignals.filter(s => 
+      s.symbol === symbol && 
+      Date.now() - s.timestamp < 300000 // Last 5 minutes
+    );
+    
+    if (recentSymbolSignals.length >= this.config.maxSignalsPerSymbol) {
+      console.log(`🚫 Too many recent signals for ${symbol} (${recentSymbolSignals.length}/${this.config.maxSignalsPerSymbol})`);
+      return null;
+    }
+
     const selectedStrategy = this.selectStrategy(features, regime);
     const signal = this.executeStrategy(selectedStrategy, symbol, price, features, regime);
     
-    if (signal && signal.confidence >= 0.3) { // Reduced from 0.6 to 0.3 for more signals
+    if (signal && signal.confidence >= this.config.minConfidenceThreshold) {
       console.log(`📶 Signal passed confidence threshold: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}%)`);
       
       // Save signal to database
@@ -120,6 +156,9 @@ class AIOrchestrator {
       }
       
       this.recentSignals.push(signal);
+      this.lastSignalTime.set(symbol, Date.now());
+      
+      // Keep only recent signals (last 100)
       
       // Keep only recent signals
       if (this.recentSignals.length > 100) {
@@ -128,7 +167,7 @@ class AIOrchestrator {
       
       return { signal, signalId };
     } else if (signal) {
-      console.log(`❌ Signal rejected - low confidence: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}% < 30%)`);
+      console.log(`❌ Signal rejected - low confidence: ${signal.strategy} - ${signal.action} ${signal.symbol} (${(signal.confidence*100).toFixed(1)}% < ${(this.config.minConfidenceThreshold*100).toFixed(1)}%)`);
     }
     
     return null;
@@ -217,9 +256,9 @@ class AIOrchestrator {
   private trendFollowingStrategy(signal: TradingSignal, features: FeatureSet): TradingSignal {
     const trendStrength = Math.abs(features.trend);
     
-    if (trendStrength > 0.01) { // Much more aggressive - reduced from 0.3
+    if (trendStrength > 0.005) { // Dynamic threshold based on market conditions
       signal.action = features.trend > 0 ? 'buy' : 'sell';
-      signal.confidence = Math.min(trendStrength * 10, 1); // Increased multiplier
+      signal.confidence = Math.min(trendStrength * 15, 0.95); // Cap at 95% confidence
       signal.reasoning = `Trend detected: ${features.trend > 0 ? 'upward' : 'downward'} (${(features.trend * 100).toFixed(3)}%)`;
     }
     
@@ -229,9 +268,9 @@ class AIOrchestrator {
   private momentumStrategy(signal: TradingSignal, features: FeatureSet): TradingSignal {
     const momentumStrength = Math.abs(features.momentum);
     
-    if (momentumStrength > 0.001) { // Much more aggressive - reduced from 0.02
+    if (momentumStrength > 0.002) { // Balanced threshold
       signal.action = features.momentum > 0 ? 'buy' : 'sell';
-      signal.confidence = Math.min(momentumStrength * 50, 1); // Increased multiplier
+      signal.confidence = Math.min(momentumStrength * 25, 0.9); // Reasonable multiplier
       signal.reasoning = `Momentum signal: ${(features.momentum * 100).toFixed(3)}%`;
     }
     
@@ -399,6 +438,52 @@ class AIOrchestrator {
 
   getRecentSignals(): TradingSignal[] {
     return this.recentSignals.slice(-10);
+  }
+
+  updateConfig(newConfig: Partial<AIOrchestrator['config']>) {
+    this.config = { ...this.config, ...newConfig };
+    console.log(`🔧 Updated AI config:`, this.config);
+  }
+
+  getConfig() {
+    return { ...this.config };
+  }
+
+  getSignalStats(): {
+    totalSignals: number;
+    signalsLast24h: number;
+    averageConfidence: number;
+    topStrategies: Array<{ strategy: string; count: number; avgConfidence: number }>;
+  } {
+    const now = Date.now();
+    const last24h = this.recentSignals.filter(s => now - s.timestamp < 86400000);
+    
+    const strategyStats = new Map<string, { count: number; totalConfidence: number }>();
+    
+    this.recentSignals.forEach(signal => {
+      const stats = strategyStats.get(signal.strategy) || { count: 0, totalConfidence: 0 };
+      stats.count++;
+      stats.totalConfidence += signal.confidence;
+      strategyStats.set(signal.strategy, stats);
+    });
+
+    const topStrategies = Array.from(strategyStats.entries())
+      .map(([strategy, stats]) => ({
+        strategy,
+        count: stats.count,
+        avgConfidence: stats.totalConfidence / stats.count
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return {
+      totalSignals: this.recentSignals.length,
+      signalsLast24h: last24h.length,
+      averageConfidence: this.recentSignals.length > 0 
+        ? this.recentSignals.reduce((sum, s) => sum + s.confidence, 0) / this.recentSignals.length 
+        : 0,
+      topStrategies
+    };
   }
 }
 

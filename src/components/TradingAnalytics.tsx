@@ -67,10 +67,17 @@ const TradingAnalytics = () => {
 
   const startNewSession = async () => {
     try {
-      const sessionId = await SupabaseTradingService.startTradingSession(10000, {
+      // Get current configuration from engines
+      const profitConfig = profitEngine?.getConfig() || { maxPositions: 250, riskPerTrade: 0.02 };
+      const aiConfig = aiOrchestrator?.getConfig() || { minConfidenceThreshold: 0.25 };
+      
+      const sessionId = await SupabaseTradingService.startTradingSession(50000, {
         strategies: ['all'],
-        riskLevel: 'medium',
-        maxPositions: 10
+        riskLevel: 'dynamic',
+        maxPositions: profitConfig.maxPositions,
+        riskPerTrade: profitConfig.riskPerTrade,
+        minConfidence: aiConfig.minConfidenceThreshold,
+        tradingPairs: 'top20_by_volume'
       });
       if (sessionId) {
         await loadCurrentSession();

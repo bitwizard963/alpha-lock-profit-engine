@@ -1,6 +1,15 @@
 import { TradingSignal } from './AIOrchestrator';
 import SupabaseTradingService from './SupabaseTradingService';
 
+interface TradingConfig {
+  maxPositions: number;
+  riskPerTrade: number;
+  stopLossPercent: number;
+  takeProfitMultiplier: number;
+  atrPeriod: number;
+  trailingStopPercent: number;
+}
+
 interface Position {
   id: string;
   symbol: string;
@@ -37,21 +46,37 @@ class ProfitLockingEngine {
   private exitCallbacks: Set<(position: Position, reason: string) => void> = new Set();
   private priceHistory: Record<string, number[]> = {};
   private signalIdMap: Map<string, string> = new Map(); // Maps position IDs to signal IDs
+  private config: TradingConfig;
 
-  private defaultConfigs: Record<string, ProfitLockConfig> = {
+  constructor(config?: Partial<TradingConfig>) {
+    this.config = {
+      maxPositions: 250, // Increased from default 5-6
+      riskPerTrade: 0.02, // 2% risk per trade (configurable)
+      stopLossPercent: 0.03, // 3% stop loss (configurable)
+      takeProfitMultiplier: 2.5, // 2.5:1 risk/reward ratio
+      atrPeriod: 14, // ATR calculation period
+      trailingStopPercent: 0.02, // 2% trailing stop
+      ...config
+    };
+    
+    console.log(`🎯 ProfitLockingEngine initialized with max ${this.config.maxPositions} positions`);
+  }
+
+  private get defaultConfigs(): Record<string, ProfitLockConfig> {
+    return {
     volatility_adaptive_trailing_stop: {
       method: 'volatility_adaptive_trailing_stop',
-      atrMultiplier: 5.0, // Much wider stops for testing
-      trailingPercent: 0.05, // 5% trailing stop
+      atrMultiplier: this.config.takeProfitMultiplier,
+      trailingPercent: this.config.trailingStopPercent,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.1, // Much lower threshold
-      maxDrawdownPercent: 0.15 // Allow larger drawdown
+      edgeDecayThreshold: 0.1,
+      maxDrawdownPercent: 0.15
     },
     partial_profit_scaling: {
       method: 'partial_profit_scaling',
-      atrMultiplier: 4.0,
-      trailingPercent: 0.04,
+      atrMultiplier: this.config.takeProfitMultiplier * 0.8,
+      trailingPercent: this.config.trailingStopPercent * 0.8,
       partialProfitLevels: [0.5, 0.75],
       timeBasedExitMinutes: 0,
       edgeDecayThreshold: 0.1,
@@ -59,8 +84,8 @@ class ProfitLockingEngine {
     },
     fixed_take_profit: {
       method: 'fixed_take_profit',
-      atrMultiplier: 3.0,
-      trailingPercent: 0.06,
+      atrMultiplier: this.config.takeProfitMultiplier * 0.6,
+      trailingPercent: this.config.trailingStopPercent * 1.2,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
       edgeDecayThreshold: 0.1,
@@ -68,41 +93,48 @@ class ProfitLockingEngine {
     },
     time_based_stop: {
       method: 'time_based_stop',
-      atrMultiplier: 4.0,
-      trailingPercent: 0.05,
+      atrMultiplier: this.config.takeProfitMultiplier,
+      trailingPercent: this.config.trailingStopPercent,
       partialProfitLevels: [],
-      timeBasedExitMinutes: 60, // Longer time for testing
+      timeBasedExitMinutes: 240, // 4 hours max hold time
       edgeDecayThreshold: 0.1,
       maxDrawdownPercent: 0.15
     },
     edge_decay_exit: {
       method: 'edge_decay_exit',
-      atrMultiplier: 5.0,
-      trailingPercent: 0.06,
+      atrMultiplier: this.config.takeProfitMultiplier * 1.2,
+      trailingPercent: this.config.trailingStopPercent * 1.5,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
-      edgeDecayThreshold: 0.05, // Very low threshold
+      edgeDecayThreshold: 0.05,
       maxDrawdownPercent: 0.18
     },
     drawdown_trailing_stop: {
       method: 'drawdown_trailing_stop',
-      atrMultiplier: 6.0,
-      trailingPercent: 0.04,
+      atrMultiplier: this.config.takeProfitMultiplier * 1.4,
+      trailingPercent: this.config.trailingStopPercent * 0.8,
       partialProfitLevels: [],
       timeBasedExitMinutes: 0,
       edgeDecayThreshold: 0.1,
       maxDrawdownPercent: 0.10
     }
-  };
-
-  constructor() {
-    // Initialize price history
-    ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'].forEach(symbol => {
-      this.priceHistory[symbol] = [];
-    });
+    };
   }
 
   addPosition(signal: TradingSignal, size: number, signalId?: string): string {
+    // Check position limits
+    if (this.positions.size >= this.config.maxPositions) {
+      console.log(`⚠️ Maximum positions reached (${this.config.maxPositions}), rejecting new position`);
+      return '';
+    }
+
+    // Check if we already have too many positions for this symbol (max 3 per symbol)
+    const existingPositions = Array.from(this.positions.values()).filter(p => p.symbol === signal.symbol);
+    if (existingPositions.length >= 3) {
+      console.log(`⚠️ Maximum positions for ${signal.symbol} reached (3), rejecting new position`);
+      return '';
+    }
+
     const positionId = `${signal.symbol}_${Date.now()}`;
     const method = this.selectProfitLockMethod(signal);
     const config = this.defaultConfigs[method];
@@ -130,7 +162,7 @@ class ProfitLockingEngine {
     };
 
     this.positions.set(positionId, position);
-    console.log(`Added position ${positionId} using ${method}`);
+    console.log(`✅ Added position ${positionId} using ${method} (${this.positions.size}/${this.config.maxPositions})`);
     
     // Save to database if signalId provided
     if (signalId) {
@@ -153,10 +185,13 @@ class ProfitLockingEngine {
   private updatePosition(position: Position, currentPrice: number) {
     position.currentPrice = currentPrice;
     
-    // Update price history
-    this.priceHistory[position.symbol] = this.priceHistory[position.symbol] || [];
+    // Initialize price history for new symbols
+    if (!this.priceHistory[position.symbol]) {
+      this.priceHistory[position.symbol] = [];
+    }
+    
     this.priceHistory[position.symbol].push(currentPrice);
-    if (this.priceHistory[position.symbol].length > 100) {
+    if (this.priceHistory[position.symbol].length > this.config.atrPeriod * 5) {
       this.priceHistory[position.symbol].shift();
     }
 
@@ -269,21 +304,23 @@ class ProfitLockingEngine {
 
   private calculateATR(symbol: string): number {
     const prices = this.priceHistory[symbol] || [];
-    if (prices.length < 14) return prices.length > 0 ? prices[prices.length - 1] * 0.02 : 0.01; // 2% of current price as default
+    if (prices.length < this.config.atrPeriod) {
+      return prices.length > 0 ? prices[prices.length - 1] * this.config.stopLossPercent : 0.01;
+    }
 
     // For crypto, we'll use price ranges as a proxy for ATR
     let atrSum = 0;
-    for (let i = 1; i < Math.min(14, prices.length); i++) {
+    for (let i = 1; i < Math.min(this.config.atrPeriod, prices.length); i++) {
       const priceRange = Math.abs(prices[i] - prices[i - 1]);
       atrSum += priceRange;
     }
     
-    return atrSum / Math.min(13, prices.length - 1);
+    return atrSum / Math.min(this.config.atrPeriod - 1, prices.length - 1);
   }
 
   private calculateInitialStopPrice(signal: TradingSignal, config: ProfitLockConfig, atr: number): number {
-    // Use a percentage-based initial stop instead of ATR for more predictable results
-    const stopDistance = signal.price * 0.05; // 5% initial stop
+    // Use configurable percentage-based initial stop
+    const stopDistance = signal.price * this.config.stopLossPercent;
     
     if (signal.action === 'buy') {
       return signal.price - stopDistance;
@@ -385,6 +422,24 @@ class ProfitLockingEngine {
 
   removePosition(id: string) {
     this.positions.delete(id);
+    this.signalIdMap.delete(id);
+  }
+
+  updateConfig(newConfig: Partial<TradingConfig>) {
+    this.config = { ...this.config, ...newConfig };
+    console.log(`🔧 Updated trading config:`, this.config);
+  }
+
+  getConfig(): TradingConfig {
+    return { ...this.config };
+  }
+
+  getPositionLimits(): { current: number; max: number; available: number } {
+    return {
+      current: this.positions.size,
+      max: this.config.maxPositions,
+      available: this.config.maxPositions - this.positions.size
+    };
   }
 
   // Hybrid profit locking methods
@@ -408,4 +463,4 @@ class ProfitLockingEngine {
 }
 
 export default ProfitLockingEngine;
-export type { Position, ProfitLockConfig };
+export type { Position, ProfitLockConfig, TradingConfig };

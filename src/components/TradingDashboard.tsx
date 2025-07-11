@@ -196,9 +196,10 @@ const TradingDashboard = () => {
   };
 
   const calculatePositionSize = (signal: TradingSignal): number => {
-    // Calculate position size in coin amount for better control
+    // Use configurable risk management
     const accountValue = stats.totalEquity;
-    const positionValue = accountValue * 0.1; // 10% of account per position
+    const riskPerTrade = profitEngine.getConfig().riskPerTrade;
+    const positionValue = accountValue * riskPerTrade;
     return positionValue / signal.price; // Convert USD to coin amount
   };
 
@@ -286,7 +287,11 @@ const TradingDashboard = () => {
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
-              <div className="text-sm text-muted-foreground mb-2">BTC/USDT Live Price</div>
+              <div className="text-sm text-muted-foreground mb-2">
+                {Object.keys(marketData?.tickers || {}).length > 0 
+                  ? `${Object.keys(marketData.tickers)[0]} Live Price` 
+                  : 'Market Data Loading...'}
+              </div>
               <div className="flex items-center justify-center gap-3 mb-3">
                 <Activity className="h-6 w-6 text-primary" />
                 <div className="text-4xl font-bold text-primary">
@@ -313,6 +318,10 @@ const TradingDashboard = () => {
               <div className="text-sm text-muted-foreground">
                 Regime Confidence: {((currentRegime?.confidence || 0) * 100).toFixed(1)}%
               </div>
+              <div className="text-xs text-muted-foreground mt-2">
+                Active Pairs: {marketData ? Object.keys(marketData.tickers).length : 0} | 
+                Positions: {positions.length}/{profitEngine.getConfig().maxPositions}
+              </div>
               {features && (
                 <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
                   <div>VVIX: {features.vvix.toFixed(3)}</div>
@@ -336,7 +345,9 @@ const TradingDashboard = () => {
             <div className="text-2xl font-bold text-profit">
               {formatCurrency(stats.totalEquity)}
             </div>
-            <p className="text-xs text-muted-foreground">{stats.activeStrategies} strategies active</p>
+            <p className="text-xs text-muted-foreground">
+              {stats.activeStrategies} strategies | Risk: {(profitEngine.getConfig().riskPerTrade * 100).toFixed(1)}%/trade
+            </p>
           </CardContent>
         </Card>
 
@@ -391,7 +402,7 @@ const TradingDashboard = () => {
         <CardContent>
           {positions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              AI system ready - waiting for signals
+              AI system ready - scanning {marketData ? Object.keys(marketData.tickers).length : 0} pairs for signals
             </div>
           ) : (
             <div className="space-y-4">

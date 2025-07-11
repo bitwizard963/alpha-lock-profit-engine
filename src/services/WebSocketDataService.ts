@@ -21,6 +21,13 @@ interface MarketData {
 
 import { localTradingService } from './LocalTradingService';
 
+interface TradingPair {
+  symbol: string;
+  volume24h: number;
+  priceChangePercent: number;
+  quoteVolume: number;
+}
+
 class WebSocketDataService {
   private ws: WebSocket | null = null;
   private subscribers: Set<(data: MarketData) => void> = new Set();
@@ -30,23 +37,85 @@ class WebSocketDataService {
     lastUpdate: 0
   };
   private reconnectInterval = 5000;
-  private symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
+  private symbols: string[] = [];
+  private maxSymbols = 20; // Top 20 pairs by volume
+  private symbolUpdateInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    this.connect();
+    this.initializeTopPairs();
+  }
+
+  private async initializeTopPairs() {
+    try {
+      console.log('🔍 Fetching top trading pairs...');
+      
+      // Fetch 24hr ticker statistics to get top pairs by volume
+      const response = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const tickers: TradingPair[] = await response.json();
+      
+      // Filter for USDT pairs only and sort by quote volume
+      const usdtPairs = tickers
+        .filter(ticker => 
+          ticker.symbol.endsWith('USDT') && 
+          !ticker.symbol.includes('UP') && 
+          !ticker.symbol.includes('DOWN') &&
+          !ticker.symbol.includes('BULL') &&
+          !ticker.symbol.includes('BEAR') &&
+          parseFloat(ticker.quoteVolume.toString()) > 10000000 // Min $10M volume
+        )
+        .sort((a, b) => parseFloat(b.quoteVolume.toString()) - parseFloat(a.quoteVolume.toString()))
+        .slice(0, this.maxSymbols);
+
+      this.symbols = usdtPairs.map(pair => pair.symbol);
+      
+      console.log(`✅ Selected top ${this.symbols.length} trading pairs:`, this.symbols);
+      console.log('📊 Volume leaders:', usdtPairs.slice(0, 5).map(p => 
+        `${p.symbol}: $${(parseFloat(p.quoteVolume.toString()) / 1000000).toFixed(1)}M`
+      ));
+      
+      // Connect to WebSocket with selected pairs
+      this.connect();
+      
+      // Update pairs every hour
+      this.symbolUpdateInterval = setInterval(() => {
+        this.initializeTopPairs();
+      }, 3600000);
+      
+    } catch (error) {
+      console.error('❌ Error fetching top pairs, falling back to defaults:', error);
+      // Fallback to major pairs if API fails
+      this.symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT', 'DOTUSDT', 'DOGEUSDT'];
+      this.connect();
+    }
   }
 
   private connect() {
+    if (this.symbols.length === 0) {
+      console.log('⏳ Waiting for symbols to be loaded...');
+      return;
+    }
+
     try {
-      console.log('Attempting WebSocket connection...');
-      // Using Binance WebSocket for real-time data
+      // Close existing connection
+      if (this.ws) {
+        this.ws.close();
+      }
+
+      console.log(`🔌 Connecting to WebSocket with ${this.symbols.length} symbols...`);
+      
+      // Create streams for all selected symbols
       const streams = this.symbols.map(s => `${s.toLowerCase()}@ticker`).join('/');
       const wsUrl = `wss://stream.binance.com:9443/ws/${streams}`;
-      console.log('Connecting to:', wsUrl);
+      
+      console.log('🌐 WebSocket URL:', wsUrl);
       this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('✅ WebSocket connected successfully!');
+        console.log(`✅ WebSocket connected successfully with ${this.symbols.length} pairs!`);
         this.subscribeToOrderBooks();
       };
       
@@ -54,28 +123,47 @@ class WebSocketDataService {
         this.handleMessage(JSON.parse(event.data));
       };
       
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected, reconnecting...');
+      this.ws.onclose = (event) => {
+        console.log(`🔌 WebSocket disconnected (code: ${event.code}), reconnecting...`);
         setTimeout(() => this.connect(), this.reconnectInterval);
       };
       
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        console.error('❌ WebSocket error:', error);
       };
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error);
+      console.error('❌ Failed to connect WebSocket:', error);
       setTimeout(() => this.connect(), this.reconnectInterval);
     }
   }
 
   private subscribeToOrderBooks() {
-    // Subscribe to depth streams for order book data
-    this.symbols.forEach(symbol => {
-      const depthWs = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@depth20@100ms`);
-      depthWs.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        this.updateOrderBook(symbol, data);
-      };
+    // Subscribe to depth streams for order book data (limit to top 10 for performance)
+    const topSymbols = this.symbols.slice(0, 10);
+    
+    topSymbols.forEach(symbol => {
+      try {
+        const depthWs = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@depth20@100ms`);
+        
+        depthWs.onopen = () => {
+          console.log(`📊 Order book connected for ${symbol}`);
+        };
+        
+        depthWs.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          this.updateOrderBook(symbol, data);
+        };
+        
+        depthWs.onerror = (error) => {
+          console.error(`❌ Order book error for ${symbol}:`, error);
+        };
+        
+        depthWs.onclose = () => {
+          console.log(`📊 Order book disconnected for ${symbol}`);
+        };
+      } catch (error) {
+        console.error(`❌ Failed to connect order book for ${symbol}:`, error);
+      }
     });
   }
 
@@ -98,7 +186,14 @@ class WebSocketDataService {
     this.marketData.lastUpdate = Date.now();
     
     // Save market data using local service
-    localTradingService.saveMarketData(this.marketData).catch(console.error);
+    localTradingService.saveMarketData({
+      symbol: data.s,
+      price: tickerData.price,
+      volume: tickerData.volume,
+      timestamp: new Date().toISOString(),
+      change: tickerData.change24h,
+      changePercent: tickerData.change24h
+    }).catch(console.error);
     
     this.notifySubscribers();
   }
@@ -121,7 +216,7 @@ class WebSocketDataService {
       try {
         callback(this.marketData);
       } catch (error) {
-        console.error('Error in subscriber callback:', error);
+        console.error('❌ Error in subscriber callback:', error);
       }
     });
   }
@@ -142,7 +237,22 @@ class WebSocketDataService {
     return this.marketData;
   }
 
+  getActiveSymbols(): string[] {
+    return [...this.symbols];
+  }
+
+  updateMaxSymbols(count: number) {
+    if (count > 0 && count <= 50) {
+      this.maxSymbols = count;
+      console.log(`📊 Updated max symbols to ${count}, refreshing pairs...`);
+      this.initializeTopPairs();
+    }
+  }
+
   disconnect() {
+    if (this.symbolUpdateInterval) {
+      clearInterval(this.symbolUpdateInterval);
+    }
     if (this.ws) {
       this.ws.close();
     }
