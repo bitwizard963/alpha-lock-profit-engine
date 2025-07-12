@@ -50,7 +50,17 @@ class WebSocketDataService {
       console.log('🔍 Fetching top trading pairs...');
       
       // Fetch 24hr ticker statistics to get top pairs by volume
-      const response = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      // Use proxy to avoid CORS issues in development
+      const apiUrl = import.meta.env.DEV 
+        ? '/api/binance/api/v3/ticker/24hr'
+        : 'https://api.binance.com/api/v3/ticker/24hr';
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
