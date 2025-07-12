@@ -53,6 +53,11 @@ class FeatureEngine {
 
     // Update order book history
     Object.entries(marketData.orderBooks).forEach(([symbol, orderBook]) => {
+      // Initialize arrays for new symbols if not already present
+      if (!this.orderBookHistory[symbol]) {
+        this.orderBookHistory[symbol] = [];
+      }
+      
       this.orderBookHistory[symbol].push(orderBook);
       
       if (this.orderBookHistory[symbol].length > this.maxHistoryLength) {
