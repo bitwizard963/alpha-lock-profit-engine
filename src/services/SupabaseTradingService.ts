@@ -163,14 +163,6 @@ class SupabaseTradingService {
         return false;
       }
 
-      // Check if we can reach Supabase before attempting the update
-      try {
-        const { data: healthCheck } = await supabase.from('trading_positions').select('id').limit(1);
-      } catch (connectError) {
-        console.error('Supabase connection test failed:', connectError);
-        return false;
-      }
-
       // Clamp numeric values to prevent overflow
       const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
       const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
@@ -192,18 +184,26 @@ class SupabaseTradingService {
         .eq('position_id', position.id);
 
       if (error) {
-        console.error('Error updating position:', error);
+        // Check if it's a CORS or network error
+        if (error.message?.includes('CORS') || error.message?.includes('fetch')) {
+          console.error('CORS or network error updating position:', error);
+          // Try to continue without failing completely
+          return false;
+        }
+        console.error('Database error updating position:', error);
         return false;
       }
 
       return true;
     } catch (error) {
-      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-        console.error('Network error updating position - check internet connection and Supabase status:', error);
+      if (error instanceof TypeError && (error.message.includes('Failed to fetch') || error.message.includes('CORS'))) {
+        console.error('CORS or network error updating position - this is expected in development:', error);
+        // Don't treat CORS errors as critical failures
+        return false;
       } else {
         console.error('Error updating position:', error);
+        return false;
       }
-      return false;
     }
   }
 
