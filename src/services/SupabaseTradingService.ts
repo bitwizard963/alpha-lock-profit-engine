@@ -163,6 +163,14 @@ class SupabaseTradingService {
         return false;
       }
 
+      // Check if we can reach Supabase before attempting the update
+      try {
+        const { data: healthCheck } = await supabase.from('trading_positions').select('id').limit(1);
+      } catch (connectError) {
+        console.error('Supabase connection test failed:', connectError);
+        return false;
+      }
+
       // Clamp numeric values to prevent overflow
       const clampToDecimal20_8 = (value: number) => Math.max(-999999999999.99999999, Math.min(999999999999.99999999, value || 0));
       const clampToDecimal8_4 = (value: number) => Math.max(-9999.9999, Math.min(9999.9999, value || 0));
@@ -190,7 +198,11 @@ class SupabaseTradingService {
 
       return true;
     } catch (error) {
-      console.error('Error updating position:', error);
+      if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+        console.error('Network error updating position - check internet connection and Supabase status:', error);
+      } else {
+        console.error('Error updating position:', error);
+      }
       return false;
     }
   }
