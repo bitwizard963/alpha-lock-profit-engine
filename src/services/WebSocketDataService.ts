@@ -118,9 +118,9 @@ class WebSocketDataService {
 
       console.log(`🔌 Connecting to WebSocket with ${this.symbols.length} symbols...`);
       
-      // Create streams for all selected symbols
+      // Use combined streams endpoint for multiple symbols
       const streams = this.symbols.map(s => `${s.toLowerCase()}@ticker`).join('/');
-      const wsUrl = `wss://stream.binance.com:9443/ws/${streams}`;
+      const wsUrl = `wss://stream.binance.com:9443/stream?streams=${streams}`;
       
       console.log('🌐 WebSocket URL:', wsUrl);
       this.ws = new WebSocket(wsUrl);
@@ -149,37 +149,54 @@ class WebSocketDataService {
   }
 
   private subscribeToOrderBooks() {
-    // Subscribe to depth streams for order book data (limit to top 10 for performance)
-    const topSymbols = this.symbols.slice(0, 10);
+    // Subscribe to depth streams for order book data (limit to top 5 for performance)
+    const topSymbols = this.symbols.slice(0, 5);
     
-    topSymbols.forEach(symbol => {
+    if (topSymbols.length > 0) {
       try {
-        const depthWs = new WebSocket(`wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@depth20@100ms`);
+        // Use combined streams for order book data
+        const depthStreams = topSymbols.map(s => `${s.toLowerCase()}@depth20@100ms`).join('/');
+        const depthWsUrl = `wss://stream.binance.com:9443/stream?streams=${depthStreams}`;
+        
+        const depthWs = new WebSocket(depthWsUrl);
         
         depthWs.onopen = () => {
-          console.log(`📊 Order book connected for ${symbol}`);
+          console.log(`📊 Order book streams connected for ${topSymbols.length} symbols`);
         };
         
         depthWs.onmessage = (event) => {
           const data = JSON.parse(event.data);
-          this.updateOrderBook(symbol, data);
+          if (data.stream && data.data) {
+            // Extract symbol from stream name (e.g., "btcusdt@depth20@100ms" -> "BTCUSDT")
+            const symbol = data.stream.split('@')[0].toUpperCase() + 'T';
+            this.updateOrderBook(symbol, data.data);
+          }
         };
         
         depthWs.onerror = (error) => {
-          console.error(`❌ Order book error for ${symbol}:`, error);
+          console.error(`❌ Order book streams error:`, error);
         };
         
         depthWs.onclose = () => {
-          console.log(`📊 Order book disconnected for ${symbol}`);
+          console.log(`📊 Order book streams disconnected`);
+          // Reconnect after delay
+          setTimeout(() => this.subscribeToOrderBooks(), 5000);
         };
       } catch (error) {
-        console.error(`❌ Failed to connect order book for ${symbol}:`, error);
+        console.error(`❌ Failed to connect order book streams:`, error);
       }
-    });
+    }
   }
 
   private handleMessage(data: any) {
-    if (data.e === '24hrTicker') {
+    // Handle combined stream format
+    if (data.stream && data.data) {
+      if (data.data.e === '24hrTicker') {
+        this.updateTicker(data.data);
+      }
+    }
+    // Handle single stream format (fallback)
+    else if (data.e === '24hrTicker') {
       this.updateTicker(data);
     }
   }
